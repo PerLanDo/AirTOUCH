@@ -43,6 +43,10 @@ android {
   buildFeatures {
     compose = true
   }
+
+  androidResources {
+    noCompress += "task"
+  }
 }
 
 dependencies {
@@ -63,5 +67,6 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation("androidx.lifecycle:lifecycle-service:2.8.7")
   implementation(libs.kotlinx.coroutines.android)
+  implementation(libs.mediapipe.tasks.vision)
   debugImplementation(libs.androidx.compose.ui.tooling)
 }

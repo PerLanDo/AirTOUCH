@@ -9,7 +9,7 @@
     <string name="hand_detected">Hand detected</string>
     <string name="settings_title">Bubble settings</string>
     <string name="settings_subtitle">Open TikTok, IG, FB, or YT and use gestures.</string>
-    <string name="gesture_help_short">Close hand, swipe down = next\nClose hand, swipe up = previous\nHold open palm = play/pause</string>
+    <string name="gesture_help_short">Close fist, swipe down = next\nClose fist, swipe up = previous\nOpen palm (fingers spread) = play/pause</string>
     <string name="stop_bubble">Stop bubble</string>
     <string name="gesture_next">Next</string>
     <string name="gesture_previous">Previous</string>
