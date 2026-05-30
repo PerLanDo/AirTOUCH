@@ -45,6 +45,11 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <com.example.ui.HandSkeletonOverlayView
+            android:id="@+id/camera_skeleton_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
         <TextView
             android:id="@+id/camera_preview_status"
             android:layout_width="match_parent"

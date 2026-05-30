@@ -2,6 +2,7 @@ package com.example.gesture
 
 import android.content.Context
 import android.os.SystemClock
+import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.MediaImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
@@ -10,6 +11,7 @@ import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import java.io.Closeable
+import kotlin.math.max
 
 /**
  * Wraps MediaPipe Hand Landmarker for live camera frames.
@@ -53,13 +55,24 @@ class HandLandmarkerEngine(context: Context) : Closeable {
 
             val result = handLandmarker.detectForVideo(mpImage, processingOptions, frameTimestampMs)
             val landmarks = result.landmarks().firstOrNull() ?: return null
-            val confidence = result.handedness()
+
+            val handednessScore = result.handedness()
                 .firstOrNull()
                 ?.firstOrNull()
                 ?.score()
-                ?: MIN_PRESENCE_CONFIDENCE
+                ?: 0f
+
+            val avgVisibility = landmarks
+                .map { landmark -> landmark.visibility().orElse(0f) }
+                .average()
+                .toFloat()
+
+            val confidence = max(handednessScore, avgVisibility)
 
             Detection(landmarks = landmarks, confidence = confidence)
+        } catch (e: Exception) {
+            Log.e(TAG, "Hand detection failed", e)
+            null
         } finally {
             mpImage.close()
         }
@@ -70,9 +83,10 @@ class HandLandmarkerEngine(context: Context) : Closeable {
     }
 
     companion object {
+        private const val TAG = "HandLandmarkerEngine"
         private const val MODEL_ASSET = "hand_landmarker.task"
-        private const val MIN_DETECTION_CONFIDENCE = 0.5f
-        private const val MIN_PRESENCE_CONFIDENCE = 0.5f
-        private const val MIN_TRACKING_CONFIDENCE = 0.5f
+        private const val MIN_DETECTION_CONFIDENCE = 0.35f
+        private const val MIN_PRESENCE_CONFIDENCE = 0.35f
+        private const val MIN_TRACKING_CONFIDENCE = 0.35f
     }
 }

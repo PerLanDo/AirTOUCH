@@ -28,6 +28,7 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 - **Tap** the bubble to open settings (stop, gesture help)
 - **Tap − / +** on the camera preview to minimize or maximize it
 - Green border on bubble = hand detected
+- **Skeleton overlay** on the camera preview shows live hand bones (green) and joints (blue), mirrored to match the front camera
 
 ## Build
 

@@ -36,6 +36,8 @@ import com.example.R
 import com.example.accessibility.SpatialAccessibilityService
 import com.example.gesture.GestureType
 import com.example.gesture.HandGestureAnalyzer
+import com.example.ui.HandSkeletonOverlayView
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -54,6 +56,7 @@ class BubbleService : LifecycleService() {
     private var cameraPreviewContainer: FrameLayout? = null
     private var cameraPreviewView: PreviewView? = null
     private var cameraPreviewStatus: TextView? = null
+    private var cameraSkeletonOverlay: HandSkeletonOverlayView? = null
     private var cameraPreviewToggle: ImageView? = null
     private var previewExpanded = true
 
@@ -181,6 +184,7 @@ class BubbleService : LifecycleService() {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
         cameraPreviewStatus = preview.findViewById(R.id.camera_preview_status)
+        cameraSkeletonOverlay = preview.findViewById(R.id.camera_skeleton_overlay)
         cameraPreviewToggle = preview.findViewById(R.id.camera_preview_toggle)
 
         cameraPreviewToggle?.setOnClickListener { togglePreviewSize() }
@@ -349,6 +353,7 @@ class BubbleService : LifecycleService() {
                     applicationContext,
                     onGestureDetected = ::onGestureDetected,
                     onStatusUpdated = ::onTrackingUpdated,
+                    onLandmarksUpdated = ::onLandmarksUpdated,
                 )
                 gestureAnalyzer?.close()
                 gestureAnalyzer = analyzer
@@ -359,6 +364,8 @@ class BubbleService : LifecycleService() {
 
 
                 val analysis = ImageAnalysis.Builder()
+                    .setResolutionSelector(portraitSelector)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .setTargetRotation(rotation)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
@@ -397,9 +404,20 @@ class BubbleService : LifecycleService() {
         }
     }
 
+    private fun onLandmarksUpdated(landmarks: List<NormalizedLandmark>?, confidence: Float) {
+        bubbleRoot?.post {
+            val overlay = cameraSkeletonOverlay ?: return@post
+            if (landmarks != null && confidence >= HAND_ACTIVE_CONFIDENCE) {
+                overlay.updateLandmarks(landmarks)
+            } else {
+                overlay.clearLandmarks()
+            }
+        }
+    }
+
     private fun onTrackingUpdated(x: Float, y: Float, handConfidence: Float) {
         bubbleRoot?.post {
-            val active = handConfidence > 0.5f
+            val active = handConfidence >= HAND_ACTIVE_CONFIDENCE
             bubbleIcon?.setBackgroundResource(
                 if (active) R.drawable.bubble_background_active else R.drawable.bubble_background
             )
@@ -467,6 +485,7 @@ class BubbleService : LifecycleService() {
         private const val PREVIEW_EXPANDED_HEIGHT_DP = 213
         private const val PREVIEW_MIN_WIDTH_DP = 64
         private const val PREVIEW_MIN_HEIGHT_DP = 114
+        private const val HAND_ACTIVE_CONFIDENCE = 0.35f
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
