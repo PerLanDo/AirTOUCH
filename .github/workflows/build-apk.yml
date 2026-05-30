@@ -1,0 +1,53 @@
+name: Build and push APK
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.build-outputs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Configure local.properties
+        run: echo "sdk.dir=${ANDROID_SDK_ROOT}" >> local.properties
+
+      - name: Decode debug keystore
+        run: base64 -d debug.keystore.base64 > debug.keystore
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Commit and push APK
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .build-outputs/app-debug.apk
+          if git diff --staged --quiet; then
+            echo "APK unchanged; nothing to commit."
+          else
+            git commit -m "ci: update .build-outputs/app-debug.apk"
+            git push
+          fi

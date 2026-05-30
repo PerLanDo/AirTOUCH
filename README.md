@@ -32,7 +32,16 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 
 ## Build
 
+### Download (no local build)
+
+A debug APK is built on GitHub Actions when `main` changes and committed to the repo:
+
+**[`.build-outputs/app-debug.apk`](.build-outputs/app-debug.apk)** — download from GitHub (open the file on `main` → **Download**).
+
+### Build locally (optional)
+
 ```bash
+test -f debug.keystore || base64 -d debug.keystore.base64 > debug.keystore
 ./gradlew assembleDebug
 ```
 
