@@ -8,9 +8,10 @@ import android.util.AttributeSet
 import android.view.View
 import com.example.gesture.HandLandmarkConnections
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+import kotlin.math.max
 
 /**
- * Draws hand skeleton bones and joints on top of the mirrored front-camera preview.
+ * Draws hand skeleton aligned with [androidx.camera.view.PreviewView] FIT_CENTER mapping.
  */
 class HandSkeletonOverlayView @JvmOverloads constructor(
     context: Context,
@@ -20,8 +21,12 @@ class HandSkeletonOverlayView @JvmOverloads constructor(
 
     private var landmarks: List<NormalizedLandmark>? = null
 
-    /** Front-camera preview is mirrored; flip landmark X to align overlay. */
+    /** Matches front-camera preview mirroring in CameraX. */
     var mirrorHorizontally: Boolean = true
+
+    /** Un-rotated analysis frame size (matches MediaPipe input after rotation). */
+    var sourceImageWidth: Int = 1
+    var sourceImageHeight: Int = 1
 
     private val bonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#4ADE80")
@@ -33,6 +38,14 @@ class HandSkeletonOverlayView @JvmOverloads constructor(
     private val jointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#60A5FA")
         style = Paint.Style.FILL
+    }
+
+    fun setFrameSize(width: Int, height: Int) {
+        if (width > 0 && height > 0 && (width != sourceImageWidth || height != sourceImageHeight)) {
+            sourceImageWidth = width
+            sourceImageHeight = height
+            postInvalidateOnAnimation()
+        }
     }
 
     fun updateLandmarks(points: List<NormalizedLandmark>?) {
@@ -64,7 +77,22 @@ class HandSkeletonOverlayView @JvmOverloads constructor(
     }
 
     private fun mapPoint(landmark: NormalizedLandmark): Pair<Float, Float> {
-        val normalizedX = if (mirrorHorizontally) 1f - landmark.x() else landmark.x()
-        return normalizedX * width to landmark.y() * height
+        var nx = landmark.x().coerceIn(0f, 1f)
+        val ny = landmark.y().coerceIn(0f, 1f)
+        if (mirrorHorizontally) {
+            nx = 1f - nx
+        }
+
+        val imageX = nx * sourceImageWidth
+        val imageY = ny * sourceImageHeight
+
+        val scale = minOf(
+            width / sourceImageWidth.toFloat(),
+            height / sourceImageHeight.toFloat(),
+        )
+        val offsetX = (width - sourceImageWidth * scale) / 2f
+        val offsetY = (height - sourceImageHeight * scale) / 2f
+
+        return offsetX + imageX * scale to offsetY + imageY * scale
     }
 }

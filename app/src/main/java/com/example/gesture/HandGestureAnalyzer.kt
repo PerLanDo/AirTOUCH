@@ -12,16 +12,24 @@ enum class GestureType {
     PLAY_PAUSE,
 }
 
+data class HandFrameUpdate(
+    val landmarks: List<NormalizedLandmark>?,
+    val confidence: Float,
+    val imageWidth: Int,
+    val imageHeight: Int,
+)
+
 /**
- * Runs MediaPipe hand landmark inference on camera frames and maps skeletal motion
- * to scroll / play-pause gestures.
+ * Maps hand poses to gestures:
+ * - Pinch hold → play/pause
+ * - Open palm hold → scroll up (next)
+ * - Closed fist hold → scroll down (previous)
  */
 class HandGestureAnalyzer(
     context: Context,
     private val onGestureDetected: (GestureType) -> Unit,
-    /** x/y = normalized palm position, handConfidence = model confidence (0..1). */
     private val onStatusUpdated: (trackingX: Float, trackingY: Float, handConfidence: Float) -> Unit,
-    private val onLandmarksUpdated: (landmarks: List<NormalizedLandmark>?, confidence: Float) -> Unit = { _, _ -> },
+    private val onFrameUpdated: (HandFrameUpdate) -> Unit = { },
 ) : ImageAnalysis.Analyzer, Closeable {
 
     private data class FrameHistory(
@@ -30,6 +38,7 @@ class HandGestureAnalyzer(
         val y: Float,
         val isOpenPalm: Boolean,
         val isClosedFist: Boolean,
+        val isPinching: Boolean,
         val confidence: Float,
     )
 
@@ -38,21 +47,29 @@ class HandGestureAnalyzer(
 
     private val historyWindowMs = 800L
     private var lastTriggerTime = 0L
-    private val cooldownMs = 1500L
-    private val minHandConfidence = 0.35f
+    private var cooldownMs = 1_500L
+    private var minHandConfidence = 0.35f
 
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
 
+    fun updateSettings(cooldownMs: Long, minHandConfidence: Float) {
+        this.cooldownMs = cooldownMs.coerceIn(800L, 3_000L)
+        this.minHandConfidence = minHandConfidence.coerceIn(0.2f, 0.7f)
+    }
+
     override fun analyze(image: ImageProxy) {
         val now = System.currentTimeMillis()
+        val rotation = image.imageInfo.rotationDegrees
+        val frameWidth = if (rotation == 90 || rotation == 270) image.height else image.width
+        val frameHeight = if (rotation == 90 || rotation == 270) image.width else image.height
 
         try {
             val detection = landmarkerEngine.detect(image)
             if (detection == null) {
                 decayTrackingTowardCenter()
                 onStatusUpdated(smoothedX, smoothedY, 0f)
-                onLandmarksUpdated(null, 0f)
+                onFrameUpdated(HandFrameUpdate(null, 0f, frameWidth, frameHeight))
                 return
             }
 
@@ -60,7 +77,14 @@ class HandGestureAnalyzer(
             smoothedX = smoothedX * 0.70f + pose.palmX * 0.30f
             smoothedY = smoothedY * 0.70f + pose.palmY * 0.30f
             onStatusUpdated(smoothedX, smoothedY, pose.confidence)
-            onLandmarksUpdated(detection.landmarks, pose.confidence)
+            onFrameUpdated(
+                HandFrameUpdate(
+                    landmarks = detection.landmarks,
+                    confidence = pose.confidence,
+                    imageWidth = frameWidth,
+                    imageHeight = frameHeight,
+                )
+            )
 
             if (now - lastTriggerTime <= cooldownMs) {
                 history.clear()
@@ -75,6 +99,7 @@ class HandGestureAnalyzer(
                         y = smoothedY,
                         isOpenPalm = pose.isOpenPalm,
                         isClosedFist = pose.isClosedFist,
+                        isPinching = pose.isPinching,
                         confidence = pose.confidence,
                     )
                 )
@@ -86,34 +111,36 @@ class HandGestureAnalyzer(
 
             val first = history.first()
             val last = history.last()
-            val duration = last.timestamp - first.timestamp
-            if (duration <= 200) return
+            if (last.timestamp - first.timestamp <= 200) return
 
-            val closedFistSwipe = history.count { it.isClosedFist } >= (history.size * 0.7f)
+            val pinchHold = history.count { it.isPinching } >= (history.size * 0.75f)
             val openPalmHold = history.count { it.isOpenPalm } >= (history.size * 0.75f)
+            val closedFistHold = history.count { it.isClosedFist } >= (history.size * 0.75f)
+            val heldStill = isPalmHeldStill(history)
+            val centered = isPalmCentered(history)
 
             when {
-                first.y < 0.40f && last.y > 0.60f && closedFistSwipe -> {
+                pinchHold && heldStill && centered -> {
+                    onGestureDetected(GestureType.PLAY_PAUSE)
+                    history.clear()
+                    lastTriggerTime = now
+                }
+
+                openPalmHold && heldStill && centered -> {
                     onGestureDetected(GestureType.SCROLL_UP)
                     history.clear()
                     lastTriggerTime = now
                 }
 
-                first.y > 0.60f && last.y < 0.40f && closedFistSwipe -> {
+                closedFistHold && heldStill && centered -> {
                     onGestureDetected(GestureType.SCROLL_DOWN)
-                    history.clear()
-                    lastTriggerTime = now
-                }
-
-                openPalmHold && isPalmHeldStill(history) && isPalmCentered(history) -> {
-                    onGestureDetected(GestureType.PLAY_PAUSE)
                     history.clear()
                     lastTriggerTime = now
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            onLandmarksUpdated(null, 0f)
+            onFrameUpdated(HandFrameUpdate(null, 0f, frameWidth, frameHeight))
         } finally {
             image.close()
         }
@@ -141,7 +168,7 @@ class HandGestureAnalyzer(
     private fun isPalmCentered(frames: List<FrameHistory>): Boolean {
         val meanX = frames.map { it.x }.average().toFloat()
         val meanY = frames.map { it.y }.average().toFloat()
-        return meanX in 0.35f..0.65f && meanY in 0.35f..0.65f
+        return meanX in 0.30f..0.70f && meanY in 0.30f..0.70f
     }
 
     override fun close() {

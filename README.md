@@ -18,17 +18,18 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 
 | Hand gesture | Action in other apps |
 |--------------|----------------------|
-| Closed fist swipe top → bottom | Next video |
-| Closed fist swipe bottom → top | Previous video |
-| Hold open palm (fingers extended) in center | Play / Pause (center tap) |
+| Hold open palm (fingers spread) in center | Next video |
+| Hold closed fist in center | Previous video |
+| Hold pinch (thumb + index together) in center | Play / Pause (center tap) |
 
 ## Bubble controls
 
-- **Drag** the bubble or portrait camera preview to move them
-- **Tap** the bubble to open settings (stop, gesture help)
-- **Tap − / +** on the camera preview to minimize or maximize it
-- Green border on bubble = hand detected
-- **Skeleton overlay** on the camera preview shows live hand bones (green) and joints (blue), mirrored to match the front camera
+- **Drag** the overlay card to move it (camera, settings, and stop are in one window)
+- **Tap** the header (outside buttons) to collapse or expand the panel
+- **Tap −** on the camera row to **hide** the preview; **+** to show it again
+- **Settings** in the panel: skeleton overlay, camera on start, vibration, gesture cooldown
+- Green border on bubble icon = hand detected
+- **Skeleton overlay** (green bones, blue joints) aligns with the camera preview when enabled in settings
 
 ## Build
 
