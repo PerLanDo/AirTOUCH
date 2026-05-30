@@ -47,7 +47,7 @@ class HandGestureAnalyzer(
         val isThumbsUp: Boolean,
     )
 
-    private val landmarkerEngine = HandLandmarkerEngine(context.applicationContext)
+    private val landmarkerEngine = HandLandmarkerEngine.create(context.applicationContext)
     private val recentSamples = ArrayDeque<FrameSample>()
 
     private var lastTriggerTime = 0L
@@ -75,8 +75,22 @@ class HandGestureAnalyzer(
 
         val coordinateTransform = buildCoordinateTransform(image)
 
+        val engine = landmarkerEngine
+        if (engine == null) {
+            try {
+                decayTrackingTowardCenter()
+                onStatusUpdated(smoothedX, smoothedY, 0f)
+                onFrameUpdated(
+                    HandFrameUpdate(null, 0f, cropWidth, cropHeight, crop.left, crop.top, null),
+                )
+            } finally {
+                image.close()
+            }
+            return
+        }
+
         try {
-            val detection = landmarkerEngine.detect(image)
+            val detection = engine.detect(image)
             if (detection == null) {
                 decayTrackingTowardCenter()
                 resetStreaks()
@@ -203,7 +217,7 @@ class HandGestureAnalyzer(
     }
 
     override fun close() {
-        landmarkerEngine.close()
+        landmarkerEngine?.close()
     }
 
     companion object {
