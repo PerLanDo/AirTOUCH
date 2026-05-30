@@ -27,7 +27,11 @@ class HandGestureAnalyzer(
     private val cooldownMs = 1500L
 
     // Minimum skin coverage to register active tracking (0.8% of sub-sampled frame)
-    private val minActiveSkinRatio = 0.008f 
+    private val minActiveSkinRatio = 0.008f
+
+    // Open palm coverage used for play/pause; scroll gestures require a closed palm below this
+    private val openPalmSkinRatioThreshold = 0.050f
+    private val closedPalmMaxSkinRatio = 0.045f
     
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
@@ -127,23 +131,28 @@ class HandGestureAnalyzer(
                     val duration = last.timestamp - first.timestamp
 
                     if (duration > 200) {
+                        val avgSkinRatio = history.sumOf { it.skinRatio.toDouble() }.toFloat() / history.size
+                        val maxSkinRatio = history.maxOf { it.skinRatio }
+                        val isClosedPalm =
+                            avgSkinRatio < closedPalmMaxSkinRatio && maxSkinRatio < openPalmSkinRatioThreshold
+
                         // Gesture 1: SCROLL_UP (Raised / swiped from top to bottom)
-                        // Triggered when Y starts in top half (<0.4) and ends in bottom half (>0.6)
-                        if (first.y < 0.40f && last.y > 0.60f) {
+                        // Requires a closed palm so an open palm is reserved for play/pause
+                        if (first.y < 0.40f && last.y > 0.60f && isClosedPalm) {
                             onGestureDetected(GestureType.SCROLL_UP)
                             history.clear()
                             lastTriggerTime = now
                         }
                         // Gesture 2: SCROLL_DOWN (Swiped from bottom to top)
-                        // Triggered when Y starts in bottom half (>0.6) and ends in top half (<0.4)
-                        else if (first.y > 0.60f && last.y < 0.40f) {
+                        // Requires a closed palm so an open palm is reserved for play/pause
+                        else if (first.y > 0.60f && last.y < 0.40f && isClosedPalm) {
                             onGestureDetected(GestureType.SCROLL_DOWN)
                             history.clear()
                             lastTriggerTime = now
                         }
                         // Gesture 3: SHOW PALM FOR PLAY/PAUSE
                         // Triggered when a large palm (high skin ratio) sits steadily in the middle bounds
-                        else if (skinRatio > 0.050f) {
+                        else if (skinRatio > openPalmSkinRatioThreshold) {
                             var meanY = 0f
                             var meanX = 0f
                             history.forEach {

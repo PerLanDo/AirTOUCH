@@ -16,8 +16,8 @@ A simple Android overlay app with a **floating bubble** that lets you control Ti
 
 | Hand gesture | Action in other apps |
 |--------------|----------------------|
-| Swipe hand top → bottom | Next video |
-| Swipe hand bottom → top | Previous video |
+| Closed hand swipe top → bottom | Next video |
+| Closed hand swipe bottom → top | Previous video |
 | Hold open palm in center | Play / Pause (center tap) |
 
 ## Bubble controls
