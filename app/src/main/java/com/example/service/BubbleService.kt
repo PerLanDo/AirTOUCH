@@ -36,6 +36,8 @@ import com.example.R
 import com.example.accessibility.SpatialAccessibilityService
 import com.example.gesture.GestureType
 import com.example.gesture.HandGestureAnalyzer
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 class BubbleService : LifecycleService() {
@@ -58,6 +60,8 @@ class BubbleService : LifecycleService() {
     private var statusText: TextView? = null
     private var bubbleIcon: ImageView? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private var gestureAnalyzer: HandGestureAnalyzer? = null
+    private var analysisExecutor: ExecutorService? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -75,6 +79,10 @@ class BubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        gestureAnalyzer?.close()
+        gestureAnalyzer = null
+        analysisExecutor?.shutdownNow()
+        analysisExecutor = null
         removeOverlays()
         super.onDestroy()
     }
@@ -337,19 +345,24 @@ class BubbleService : LifecycleService() {
                     .build()
                     .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
+                val analyzer = HandGestureAnalyzer(
+                    applicationContext,
+                    onGestureDetected = ::onGestureDetected,
+                    onStatusUpdated = ::onTrackingUpdated,
+                )
+                gestureAnalyzer?.close()
+                gestureAnalyzer = analyzer
+
+                val executor = analysisExecutor ?: Executors.newSingleThreadExecutor().also {
+                    analysisExecutor = it
+                }
+
+
                 val analysis = ImageAnalysis.Builder()
                     .setTargetRotation(rotation)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                    .also {
-                        it.setAnalyzer(
-                            ContextCompat.getMainExecutor(this),
-                            HandGestureAnalyzer(
-                                onGestureDetected = ::onGestureDetected,
-                                onStatusUpdated = ::onTrackingUpdated
-                            )
-                        )
-                    }
+                    .also { it.setAnalyzer(executor, analyzer) }
 
                 provider.bindToLifecycle(
                     this,
@@ -384,9 +397,9 @@ class BubbleService : LifecycleService() {
         }
     }
 
-    private fun onTrackingUpdated(x: Float, y: Float, skinRatio: Float) {
+    private fun onTrackingUpdated(x: Float, y: Float, handConfidence: Float) {
         bubbleRoot?.post {
-            val active = skinRatio > 0.012f
+            val active = handConfidence > 0.5f
             bubbleIcon?.setBackgroundResource(
                 if (active) R.drawable.bubble_background_active else R.drawable.bubble_background
             )

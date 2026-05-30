@@ -1,6 +1,8 @@
 # Spatial Motion
 
-A simple Android overlay app with a **floating bubble** that lets you control TikTok, Instagram, Facebook, and YouTube using hand gestures — no built-in video player.
+A simple Android overlay app with a **floating bubble** that lets you control TikTok, Instagram, Facebook, and YouTube using **ML hand tracking** — no built-in video player.
+
+Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmarks per hand) to recognize palm shape, finger extension, and motion — not color-based skin detection.
 
 ## How it works
 
@@ -16,9 +18,9 @@ A simple Android overlay app with a **floating bubble** that lets you control Ti
 
 | Hand gesture | Action in other apps |
 |--------------|----------------------|
-| Swipe hand top → bottom | Next video |
-| Swipe hand bottom → top | Previous video |
-| Hold open palm in center | Play / Pause (center tap) |
+| Closed fist swipe top → bottom | Next video |
+| Closed fist swipe bottom → top | Previous video |
+| Hold open palm (fingers extended) in center | Play / Pause (center tap) |
 
 ## Bubble controls
 
