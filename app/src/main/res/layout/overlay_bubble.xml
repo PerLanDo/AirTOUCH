@@ -2,17 +2,21 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:gravity="center_horizontal"
-    android:orientation="vertical">
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
 
     <FrameLayout
-        android:layout_width="56dp"
-        android:layout_height="56dp">
+        android:id="@+id/bubble_frame"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
+        android:background="@drawable/bubble_border_idle"
+        android:padding="2dp">
 
         <ImageView
             android:id="@+id/bubble_icon"
             android:layout_width="56dp"
             android:layout_height="56dp"
+            android:layout_gravity="center"
             android:background="@drawable/bubble_background"
             android:contentDescription="@string/bubble_content_desc"
             android:padding="14dp"
@@ -20,16 +24,19 @@
     </FrameLayout>
 
     <TextView
-        android:id="@+id/bubble_status"
+        android:id="@+id/bubble_side_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginStart="8dp"
         android:background="@drawable/bubble_status_background"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="3dp"
+        android:ellipsize="end"
+        android:maxWidth="120dp"
+        android:maxLines="2"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
         android:text="@string/bubble_running"
         android:textColor="#D0E4FF"
-        android:textSize="10sp"
+        android:textSize="11sp"
         android:textStyle="bold" />
 
 </LinearLayout>

@@ -62,8 +62,8 @@ object HandPoseEvaluator {
             thumbExtended,
         ).count { it }
 
-        val isOpenPalm = indexExtended && middleExtended && ringExtended && pinkyExtended
-        val isClosedFist = extendedFingerCount <= 1
+        val isOpenPalm = extendedFingerCount >= 3
+        val isClosedFist = extendedFingerCount <= 2
 
         return HandPose(
             palmX = palmX,
@@ -87,7 +87,7 @@ object HandPoseEvaluator {
         val tip = landmarks[tipIdx]
         val pip = landmarks[pipIdx]
         val mcp = landmarks[mcpIdx]
-        return distance(tip, mcp) > distance(pip, mcp) * 1.08f
+        return distance(tip, mcp) > distance(pip, mcp) * 1.04f
     }
 
     private fun isThumbExtended(landmarks: List<NormalizedLandmark>): Boolean {

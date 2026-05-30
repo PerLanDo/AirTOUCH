@@ -18,8 +18,7 @@ enum class GestureType {
 class HandGestureAnalyzer(
     context: Context,
     private val onGestureDetected: (GestureType) -> Unit,
-    /** x/y = normalized palm position, handConfidence = model confidence (0..1). */
-    private val onStatusUpdated: (trackingX: Float, trackingY: Float, handConfidence: Float) -> Unit,
+    private val onHandFrame: (HandTrackingFrame?) -> Unit,
 ) : ImageAnalysis.Analyzer, Closeable {
 
     private data class FrameHistory(
@@ -37,26 +36,36 @@ class HandGestureAnalyzer(
     private val historyWindowMs = 800L
     private var lastTriggerTime = 0L
     private val cooldownMs = 1500L
-    private val minHandConfidence = 0.5f
+    private val minHandConfidence = 0.35f
 
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
 
-    override fun analyze(image: ImageProxy) {
+    override fun analyze(imageProxy: ImageProxy) {
         val now = System.currentTimeMillis()
 
         try {
-            val detection = landmarkerEngine.detect(image)
+            val detection = landmarkerEngine.detect(imageProxy, mirrorForFrontCamera = true)
             if (detection == null) {
                 decayTrackingTowardCenter()
-                onStatusUpdated(smoothedX, smoothedY, 0f)
+                onHandFrame(null)
                 return
             }
 
             val pose = HandPoseEvaluator.evaluate(detection.landmarks, detection.confidence)
             smoothedX = smoothedX * 0.70f + pose.palmX * 0.30f
             smoothedY = smoothedY * 0.70f + pose.palmY * 0.30f
-            onStatusUpdated(smoothedX, smoothedY, pose.confidence)
+
+            onHandFrame(
+                HandTrackingFrame(
+                    landmarks = detection.landmarks,
+                    confidence = pose.confidence,
+                    palmX = smoothedX,
+                    palmY = smoothedY,
+                    isOpenPalm = pose.isOpenPalm,
+                    isClosedFist = pose.isClosedFist,
+                )
+            )
 
             if (now - lastTriggerTime <= cooldownMs) {
                 history.clear()
@@ -78,24 +87,24 @@ class HandGestureAnalyzer(
 
             history.removeAll { now - it.timestamp > historyWindowMs }
 
-            if (history.size < 6) return
+            if (history.size < 5) return
 
             val first = history.first()
             val last = history.last()
             val duration = last.timestamp - first.timestamp
-            if (duration <= 200) return
+            if (duration <= 180) return
 
-            val closedFistSwipe = history.count { it.isClosedFist } >= (history.size * 0.7f)
-            val openPalmHold = history.count { it.isOpenPalm } >= (history.size * 0.75f)
+            val closedFistSwipe = history.count { it.isClosedFist } >= (history.size * 0.55f).toInt()
+            val openPalmHold = history.count { it.isOpenPalm } >= (history.size * 0.6f).toInt()
 
             when {
-                first.y < 0.40f && last.y > 0.60f && closedFistSwipe -> {
+                first.y < 0.42f && last.y > 0.58f && closedFistSwipe -> {
                     onGestureDetected(GestureType.SCROLL_UP)
                     history.clear()
                     lastTriggerTime = now
                 }
 
-                first.y > 0.60f && last.y < 0.40f && closedFistSwipe -> {
+                first.y > 0.58f && last.y < 0.42f && closedFistSwipe -> {
                     onGestureDetected(GestureType.SCROLL_DOWN)
                     history.clear()
                     lastTriggerTime = now
@@ -109,8 +118,9 @@ class HandGestureAnalyzer(
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            onHandFrame(null)
         } finally {
-            image.close()
+            imageProxy.close()
         }
     }
 
@@ -120,7 +130,7 @@ class HandGestureAnalyzer(
     }
 
     private fun isPalmHeldStill(frames: List<FrameHistory>): Boolean {
-        if (frames.size < 8) return false
+        if (frames.size < 6) return false
 
         val meanX = frames.map { it.x }.average().toFloat()
         val meanY = frames.map { it.y }.average().toFloat()
@@ -130,13 +140,13 @@ class HandGestureAnalyzer(
             (dx * dx + dy * dy).toDouble()
         }.toFloat() / frames.size
 
-        return variance < 0.0035f
+        return variance < 0.0045f
     }
 
     private fun isPalmCentered(frames: List<FrameHistory>): Boolean {
         val meanX = frames.map { it.x }.average().toFloat()
         val meanY = frames.map { it.y }.average().toFloat()
-        return meanX in 0.35f..0.65f && meanY in 0.35f..0.65f
+        return meanX in 0.30f..0.70f && meanY in 0.30f..0.70f
     }
 
     override fun close() {

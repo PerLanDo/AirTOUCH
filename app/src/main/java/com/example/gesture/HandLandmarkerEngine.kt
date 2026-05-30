@@ -1,19 +1,19 @@
 package com.example.gesture
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.MediaImageBuilder
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import java.io.Closeable
 
 /**
  * Wraps MediaPipe Hand Landmarker for live camera frames.
- * Detects up to one hand with 21 skeletal landmarks (wrist, palm, and finger joints).
+ * Uses RGB bitmap input (with rotation + mirror) for reliable detection across devices.
  */
 class HandLandmarkerEngine(context: Context) : Closeable {
 
@@ -42,16 +42,16 @@ class HandLandmarkerEngine(context: Context) : Closeable {
         handLandmarker = HandLandmarker.createFromOptions(context, options)
     }
 
-    fun detect(imageProxy: ImageProxy): Detection? {
-        val mediaImage = imageProxy.image ?: return null
-        val mpImage = MediaImageBuilder(mediaImage).build()
+    fun detect(imageProxy: ImageProxy, mirrorForFrontCamera: Boolean = true): Detection? {
+        val bitmap = ImageProxyConverter.toBitmap(imageProxy, mirrorForFrontCamera)
+        return detect(bitmap)
+    }
+
+    fun detect(bitmap: Bitmap): Detection? {
+        val mpImage = BitmapImageBuilder(bitmap).build()
         return try {
             frameTimestampMs = maxOf(frameTimestampMs + 1, SystemClock.uptimeMillis())
-            val processingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
-                .build()
-
-            val result = handLandmarker.detectForVideo(mpImage, processingOptions, frameTimestampMs)
+            val result = handLandmarker.detectForVideo(mpImage, frameTimestampMs)
             val landmarks = result.landmarks().firstOrNull() ?: return null
             val confidence = result.handedness()
                 .firstOrNull()
@@ -71,8 +71,8 @@ class HandLandmarkerEngine(context: Context) : Closeable {
 
     companion object {
         private const val MODEL_ASSET = "hand_landmarker.task"
-        private const val MIN_DETECTION_CONFIDENCE = 0.5f
-        private const val MIN_PRESENCE_CONFIDENCE = 0.5f
-        private const val MIN_TRACKING_CONFIDENCE = 0.5f
+        private const val MIN_DETECTION_CONFIDENCE = 0.35f
+        private const val MIN_PRESENCE_CONFIDENCE = 0.35f
+        private const val MIN_TRACKING_CONFIDENCE = 0.35f
     }
 }

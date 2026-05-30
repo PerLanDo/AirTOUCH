@@ -13,5 +13,8 @@
     <string name="stop_bubble">Stop bubble</string>
     <string name="gesture_next">Next</string>
     <string name="gesture_previous">Previous</string>
-    <string name="gesture_play_pause">Play / Pause</string>
+    <string name="gesture_play_pause">Paused</string>
+    <string name="pose_open_palm">Open palm</string>
+    <string name="pose_closed_fist">Closed fist</string>
+    <string name="camera_error">Camera error</string>
 </resources>
