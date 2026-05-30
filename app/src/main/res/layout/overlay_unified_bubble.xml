@@ -5,7 +5,7 @@
     android:layout_height="wrap_content"
     android:background="@drawable/panel_background"
     android:orientation="vertical"
-    android:padding="10dp">
+    android:padding="8dp">
 
     <LinearLayout
         android:id="@+id/bubble_header"
@@ -38,11 +38,11 @@
             android:textStyle="bold" />
 
         <ImageView
-            android:id="@+id/panel_expand_toggle"
+            android:id="@+id/bubble_minimize_toggle"
             android:layout_width="28dp"
             android:layout_height="28dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/panel_expand"
+            android:contentDescription="@string/bubble_minimize"
             android:padding="4dp"
             android:src="@drawable/ic_preview_minimize" />
     </LinearLayout>
@@ -193,6 +193,27 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:text="@string/setting_minimize_on_start"
+                android:textColor="#D0E4FF"
+                android:textSize="12sp" />
+
+            <Switch
+                android:id="@+id/setting_minimize_on_start"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:text="@string/setting_vibrate"
                 android:textColor="#D0E4FF"
                 android:textSize="12sp" />
@@ -215,8 +236,8 @@
             android:id="@+id/setting_cooldown"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:max="22"
-            android:progress="7" />
+            android:max="19"
+            android:progress="6" />
 
         <TextView
             android:id="@+id/setting_cooldown_value"

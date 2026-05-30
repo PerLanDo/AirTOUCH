@@ -3,6 +3,9 @@ package com.example.gesture
 import android.content.Context
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
+import androidx.camera.view.transform.OutputTransform
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import java.io.Closeable
 
@@ -17,133 +20,181 @@ data class HandFrameUpdate(
     val confidence: Float,
     val imageWidth: Int,
     val imageHeight: Int,
+    val cropLeft: Int,
+    val cropTop: Int,
+    val coordinateTransform: CoordinateTransform?,
 )
 
 /**
- * Maps hand poses to gestures:
- * - Pinch hold → play/pause
- * - Open palm hold → scroll up (next)
- * - Closed fist hold → scroll down (previous)
+ * Gestures (hold still + centered):
+ * - Thumbs up → play/pause
+ * - Open palm → next
+ * - Closed fist → previous
  */
 class HandGestureAnalyzer(
     context: Context,
     private val onGestureDetected: (GestureType) -> Unit,
     private val onStatusUpdated: (trackingX: Float, trackingY: Float, handConfidence: Float) -> Unit,
     private val onFrameUpdated: (HandFrameUpdate) -> Unit = { },
+    private val previewTransformProvider: () -> OutputTransform?,
 ) : ImageAnalysis.Analyzer, Closeable {
 
-    private data class FrameHistory(
-        val timestamp: Long,
+    private data class FrameSample(
         val x: Float,
         val y: Float,
         val isOpenPalm: Boolean,
         val isClosedFist: Boolean,
-        val isPinching: Boolean,
-        val confidence: Float,
+        val isThumbsUp: Boolean,
     )
 
     private val landmarkerEngine = HandLandmarkerEngine(context.applicationContext)
-    private val history = mutableListOf<FrameHistory>()
+    private val recentSamples = ArrayDeque<FrameSample>()
 
-    private val historyWindowMs = 800L
     private var lastTriggerTime = 0L
-    private var cooldownMs = 1_500L
+    private var cooldownMs = 1_200L
     private var minHandConfidence = 0.35f
+
+    private var thumbsUpStreak = 0
+    private var openPalmStreak = 0
+    private var closedFistStreak = 0
 
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
 
     fun updateSettings(cooldownMs: Long, minHandConfidence: Float) {
-        this.cooldownMs = cooldownMs.coerceIn(800L, 3_000L)
+        this.cooldownMs = cooldownMs.coerceIn(600L, 2_500L)
         this.minHandConfidence = minHandConfidence.coerceIn(0.2f, 0.7f)
     }
 
     override fun analyze(image: ImageProxy) {
         val now = System.currentTimeMillis()
         val rotation = image.imageInfo.rotationDegrees
-        val frameWidth = if (rotation == 90 || rotation == 270) image.height else image.width
-        val frameHeight = if (rotation == 90 || rotation == 270) image.width else image.height
+        val crop = image.cropRect
+        val cropWidth = crop.width().coerceAtLeast(1)
+        val cropHeight = crop.height().coerceAtLeast(1)
+
+        val coordinateTransform = buildCoordinateTransform(image)
 
         try {
             val detection = landmarkerEngine.detect(image)
             if (detection == null) {
                 decayTrackingTowardCenter()
+                resetStreaks()
                 onStatusUpdated(smoothedX, smoothedY, 0f)
-                onFrameUpdated(HandFrameUpdate(null, 0f, frameWidth, frameHeight))
+                onFrameUpdated(
+                    HandFrameUpdate(null, 0f, cropWidth, cropHeight, crop.left, crop.top, coordinateTransform),
+                )
                 return
             }
 
             val pose = HandPoseEvaluator.evaluate(detection.landmarks, detection.confidence)
-            smoothedX = smoothedX * 0.70f + pose.palmX * 0.30f
-            smoothedY = smoothedY * 0.70f + pose.palmY * 0.30f
+            smoothedX = smoothedX * 0.55f + pose.palmX * 0.45f
+            smoothedY = smoothedY * 0.55f + pose.palmY * 0.45f
             onStatusUpdated(smoothedX, smoothedY, pose.confidence)
             onFrameUpdated(
                 HandFrameUpdate(
                     landmarks = detection.landmarks,
                     confidence = pose.confidence,
-                    imageWidth = frameWidth,
-                    imageHeight = frameHeight,
-                )
+                    imageWidth = cropWidth,
+                    imageHeight = cropHeight,
+                    cropLeft = crop.left,
+                    cropTop = crop.top,
+                    coordinateTransform = coordinateTransform,
+                ),
             )
 
             if (now - lastTriggerTime <= cooldownMs) {
-                history.clear()
+                resetStreaks()
                 return
             }
 
-            if (pose.confidence >= minHandConfidence) {
-                history.add(
-                    FrameHistory(
-                        timestamp = now,
-                        x = smoothedX,
-                        y = smoothedY,
-                        isOpenPalm = pose.isOpenPalm,
-                        isClosedFist = pose.isClosedFist,
-                        isPinching = pose.isPinching,
-                        confidence = pose.confidence,
-                    )
-                )
+            if (pose.confidence < minHandConfidence) {
+                resetStreaks()
+                return
             }
 
-            history.removeAll { now - it.timestamp > historyWindowMs }
+            recentSamples.addLast(
+                FrameSample(
+                    x = smoothedX,
+                    y = smoothedY,
+                    isOpenPalm = pose.isOpenPalm,
+                    isClosedFist = pose.isClosedFist,
+                    isThumbsUp = pose.isThumbsUp,
+                ),
+            )
+            while (recentSamples.size > STREAK_REQUIRED) {
+                recentSamples.removeFirst()
+            }
 
-            if (history.size < 6) return
+            updateStreaks(pose)
 
-            val first = history.first()
-            val last = history.last()
-            if (last.timestamp - first.timestamp <= 200) return
-
-            val pinchHold = history.count { it.isPinching } >= (history.size * 0.75f)
-            val openPalmHold = history.count { it.isOpenPalm } >= (history.size * 0.75f)
-            val closedFistHold = history.count { it.isClosedFist } >= (history.size * 0.75f)
-            val heldStill = isPalmHeldStill(history)
-            val centered = isPalmCentered(history)
+            if (!isHandCentered(smoothedX, smoothedY) || !isRecentlyStill()) {
+                return
+            }
 
             when {
-                pinchHold && heldStill && centered -> {
-                    onGestureDetected(GestureType.PLAY_PAUSE)
-                    history.clear()
-                    lastTriggerTime = now
+                thumbsUpStreak >= STREAK_REQUIRED -> {
+                    fireGesture(GestureType.PLAY_PAUSE, now)
                 }
-
-                openPalmHold && heldStill && centered -> {
-                    onGestureDetected(GestureType.SCROLL_UP)
-                    history.clear()
-                    lastTriggerTime = now
+                openPalmStreak >= STREAK_REQUIRED -> {
+                    fireGesture(GestureType.SCROLL_UP, now)
                 }
-
-                closedFistHold && heldStill && centered -> {
-                    onGestureDetected(GestureType.SCROLL_DOWN)
-                    history.clear()
-                    lastTriggerTime = now
+                closedFistStreak >= STREAK_REQUIRED -> {
+                    fireGesture(GestureType.SCROLL_DOWN, now)
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            onFrameUpdated(HandFrameUpdate(null, 0f, frameWidth, frameHeight))
+            onFrameUpdated(
+                HandFrameUpdate(null, 0f, cropWidth, cropHeight, crop.left, crop.top, coordinateTransform),
+            )
         } finally {
             image.close()
         }
+    }
+
+    private fun buildCoordinateTransform(image: ImageProxy): CoordinateTransform? {
+        val target = previewTransformProvider() ?: return null
+        return try {
+            val source = ImageProxyTransformFactory().getOutputTransform(image)
+            CoordinateTransform(source, target)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun updateStreaks(pose: HandPoseEvaluator.HandPose) {
+        thumbsUpStreak = if (pose.isThumbsUp) thumbsUpStreak + 1 else 0
+        openPalmStreak = if (pose.isOpenPalm) openPalmStreak + 1 else 0
+        closedFistStreak = if (pose.isClosedFist) closedFistStreak + 1 else 0
+    }
+
+    private fun fireGesture(type: GestureType, now: Long) {
+        onGestureDetected(type)
+        lastTriggerTime = now
+        resetStreaks()
+        recentSamples.clear()
+    }
+
+    private fun resetStreaks() {
+        thumbsUpStreak = 0
+        openPalmStreak = 0
+        closedFistStreak = 0
+    }
+
+    private fun isHandCentered(x: Float, y: Float): Boolean =
+        x in 0.28f..0.72f && y in 0.28f..0.72f
+
+    private fun isRecentlyStill(): Boolean {
+        if (recentSamples.size < STREAK_REQUIRED) return false
+        val meanX = recentSamples.map { it.x }.average().toFloat()
+        val meanY = recentSamples.map { it.y }.average().toFloat()
+        val variance = recentSamples.sumOf { sample ->
+            val dx = sample.x - meanX
+            val dy = sample.y - meanY
+            (dx * dx + dy * dy).toDouble()
+        }.toFloat() / recentSamples.size
+        return variance < 0.006f
     }
 
     private fun decayTrackingTowardCenter() {
@@ -151,27 +202,12 @@ class HandGestureAnalyzer(
         smoothedY = smoothedY * 0.85f + 0.5f * 0.15f
     }
 
-    private fun isPalmHeldStill(frames: List<FrameHistory>): Boolean {
-        if (frames.size < 6) return false
-
-        val meanX = frames.map { it.x }.average().toFloat()
-        val meanY = frames.map { it.y }.average().toFloat()
-        val variance = frames.sumOf { frame ->
-            val dx = frame.x - meanX
-            val dy = frame.y - meanY
-            (dx * dx + dy * dy).toDouble()
-        }.toFloat() / frames.size
-
-        return variance < 0.0035f
-    }
-
-    private fun isPalmCentered(frames: List<FrameHistory>): Boolean {
-        val meanX = frames.map { it.x }.average().toFloat()
-        val meanY = frames.map { it.y }.average().toFloat()
-        return meanX in 0.30f..0.70f && meanY in 0.30f..0.70f
-    }
-
     override fun close() {
         landmarkerEngine.close()
+    }
+
+    companion object {
+        /** ~4 analysis frames at ~15–30 fps ≈ 150–300 ms hold. */
+        private const val STREAK_REQUIRED = 4
     }
 }

@@ -20,12 +20,12 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 |--------------|----------------------|
 | Hold open palm (fingers spread) in center | Next video |
 | Hold closed fist in center | Previous video |
-| Hold pinch (thumb + index together) in center | Play / Pause (center tap) |
+| Hold thumbs up in center | Play / Pause (center tap) |
 
 ## Bubble controls
 
 - **Drag** the overlay card to move it (camera, settings, and stop are in one window)
-- **Tap** the header (outside buttons) to collapse or expand the panel
+- **Tap −** on the header to **minimize** the whole bubble to a small icon; tap the icon or **+** to restore
 - **Tap −** on the camera row to **hide** the preview; **+** to show it again
 - **Settings** in the panel: skeleton overlay, camera on start, vibration, gesture cooldown
 - Green border on bubble icon = hand detected

@@ -181,7 +181,7 @@ private fun SetupScreen(
                 Text("How it works", color = Color.White, fontWeight = FontWeight.Bold)
                 Text("1. Grant all permissions above", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
                 Text("2. Start the bubble and open TikTok, IG, FB, or YT", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-                Text("3. Open palm hold = next. Closed fist hold = previous. Pinch hold = play/pause", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                Text("3. Open palm hold = next. Closed fist hold = previous. Thumbs up hold = play/pause", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
             }
         }
 
