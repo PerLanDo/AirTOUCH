@@ -4,8 +4,7 @@ import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import kotlin.math.sqrt
 
 /**
- * Interprets MediaPipe hand landmarks into palm position and open/closed pose.
- * Uses finger joint geometry instead of skin-color heuristics.
+ * Interprets MediaPipe hand landmarks into palm position and pose flags.
  */
 object HandPoseEvaluator {
 
@@ -16,6 +15,7 @@ object HandPoseEvaluator {
         val extendedFingerCount: Int,
         val isOpenPalm: Boolean,
         val isClosedFist: Boolean,
+        val isPinching: Boolean,
     )
 
     fun evaluate(landmarks: List<NormalizedLandmark>, confidence: Float): HandPose {
@@ -64,6 +64,7 @@ object HandPoseEvaluator {
 
         val isOpenPalm = indexExtended && middleExtended && ringExtended && pinkyExtended
         val isClosedFist = extendedFingerCount <= 1
+        val isPinching = isPinch(landmarks)
 
         return HandPose(
             palmX = palmX,
@@ -72,12 +73,21 @@ object HandPoseEvaluator {
             extendedFingerCount = extendedFingerCount,
             isOpenPalm = isOpenPalm,
             isClosedFist = isClosedFist,
+            isPinching = isPinching,
         )
     }
 
-    /**
-     * A finger is extended when its tip is farther from the MCP joint than the PIP joint.
-     */
+    /** Thumb and index tips close together (pinch). */
+    private fun isPinch(landmarks: List<NormalizedLandmark>): Boolean {
+        val thumbTip = landmarks[HandLandmarkIndices.THUMB_TIP]
+        val indexTip = landmarks[HandLandmarkIndices.INDEX_TIP]
+        val indexMcp = landmarks[HandLandmarkIndices.INDEX_MCP]
+        val middleMcp = landmarks[HandLandmarkIndices.MIDDLE_MCP]
+        val pinchDistance = distance(thumbTip, indexTip)
+        val palmScale = distance(indexMcp, middleMcp).coerceAtLeast(0.02f)
+        return pinchDistance < palmScale * 0.42f
+    }
+
     private fun isFingerExtended(
         landmarks: List<NormalizedLandmark>,
         tipIdx: Int,

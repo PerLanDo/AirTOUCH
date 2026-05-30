@@ -7,15 +7,23 @@
     <string name="bubble_content_desc">Spatial Motion floating bubble</string>
     <string name="bubble_running">Active</string>
     <string name="hand_detected">Hand detected</string>
-    <string name="settings_title">Bubble settings</string>
+    <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Open TikTok, IG, FB, or YT and use gestures.</string>
-    <string name="gesture_help_short">Close fist, swipe down = next\nClose fist, swipe up = previous\nOpen palm (fingers spread) = play/pause</string>
+    <string name="gesture_help_short">Open palm hold = next\nClosed fist hold = previous\nPinch hold = play / pause</string>
     <string name="stop_bubble">Stop bubble</string>
     <string name="gesture_next">Next</string>
     <string name="gesture_previous">Previous</string>
     <string name="gesture_play_pause">Play / Pause</string>
     <string name="camera_preview_title">Camera</string>
-    <string name="camera_preview_minimize">Minimize camera preview</string>
-    <string name="camera_preview_maximize">Maximize camera preview</string>
-    <string name="camera_preview_hint">Drag the portrait preview to reposition. Tap −/+ to resize.</string>
+    <string name="camera_preview_hide">Hide camera preview</string>
+    <string name="camera_preview_show">Show camera preview</string>
+    <string name="camera_preview_minimize">Minimize</string>
+    <string name="camera_preview_maximize">Maximize</string>
+    <string name="panel_expand">Expand panel</string>
+    <string name="panel_collapse">Collapse panel</string>
+    <string name="setting_show_skeleton">Show skeleton overlay</string>
+    <string name="setting_show_camera">Show camera when bubble starts</string>
+    <string name="setting_vibrate">Vibrate on gesture</string>
+    <string name="setting_cooldown_label">Gesture cooldown</string>
+    <string name="setting_cooldown_value">%.1f seconds between gestures</string>
 </resources>
