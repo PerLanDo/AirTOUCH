@@ -20,7 +20,10 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -51,7 +54,6 @@ import com.example.ui.HandSkeletonOverlayView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
-import kotlin.math.max
 
 class BubbleService : LifecycleService() {
 
@@ -82,6 +84,7 @@ class BubbleService : LifecycleService() {
     private var cameraProvider: ProcessCameraProvider? = null
     private var gestureAnalyzer: HandGestureAnalyzer? = null
     private var analysisExecutor: ExecutorService? = null
+    private var previewLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -252,6 +255,8 @@ class BubbleService : LifecycleService() {
                 bubbleIcon?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
             }?.start()
         }
+
+        rebindCamera()
     }
 
     private fun bindSettingsControls() {
@@ -331,6 +336,7 @@ class BubbleService : LifecycleService() {
         cameraPreviewToggle?.contentDescription = getString(
             if (visible) R.string.camera_preview_hide else R.string.camera_preview_show,
         )
+        rebindCamera()
     }
 
     private fun applySkeletonVisibility() {
@@ -360,18 +366,75 @@ class BubbleService : LifecycleService() {
         return interactive.any { isTouchOnView(it, rawX, rawY) }
     }
 
+    private fun hasCameraPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun shouldAttachPreview(): Boolean {
+        if (bubbleMinimized || !cameraPreviewVisible) return false
+        return cameraPreviewContainer?.visibility == View.VISIBLE
+    }
+
+    private fun isPreviewLayoutReady(): Boolean {
+        val previewView = cameraPreviewView ?: return false
+        return previewView.width > 0 && previewView.height > 0
+    }
+
     private fun bindCamera() {
-        val previewView = cameraPreviewView ?: return
+        if (!hasCameraPermission()) {
+            Log.e(TAG, "Camera permission not granted; skipping camera bind")
+            return
+        }
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             try {
-                val provider = providerFuture.get()
-                cameraProvider = provider
+                cameraProvider = providerFuture.get()
+                rebindCamera()
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera provider failed", e)
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun rebindCamera() {
+        val provider = cameraProvider ?: return
+        if (!hasCameraPermission()) return
+
+        removePreviewLayoutListener()
+        try {
+            provider.unbindAll()
+            ensureGestureAnalyzer()
+
+            val rotation = windowManager.defaultDisplay.rotation
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setAspectRatioStrategy(
+                    AspectRatioStrategy(
+                        AspectRatio.RATIO_16_9,
+                        AspectRatioStrategy.FALLBACK_RULE_AUTO,
+                    ),
+                )
+                .build()
+
+            if (!shouldAttachPreview()) {
+                bindAnalysisOnly(provider, rotation, resolutionSelector)
+                applySkeletonVisibility()
+                return
+            }
+
+            val previewView = cameraPreviewView ?: return
+            if (!isPreviewLayoutReady()) {
+                schedulePreviewBindWhenLaidOut(provider, rotation, resolutionSelector)
+                return
+            }
+
+            bindPreviewWithAnalysis(provider, rotation, resolutionSelector, previewView)
+            applySkeletonVisibility()
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera rebind failed", e)
+            try {
                 provider.unbindAll()
-
                 val rotation = windowManager.defaultDisplay.rotation
-
-                val portraitSelector = ResolutionSelector.Builder()
+                val resolutionSelector = ResolutionSelector.Builder()
                     .setAspectRatioStrategy(
                         AspectRatioStrategy(
                             AspectRatio.RATIO_16_9,
@@ -379,58 +442,126 @@ class BubbleService : LifecycleService() {
                         ),
                     )
                     .build()
-
-                val preview = Preview.Builder()
-                    .setResolutionSelector(portraitSelector)
-                    .setTargetRotation(rotation)
-                    .build()
-                    .also { it.setSurfaceProvider(previewView.surfaceProvider) }
-
-                val analyzer = HandGestureAnalyzer(
-                    applicationContext,
-                    onGestureDetected = ::onGestureDetected,
-                    onStatusUpdated = ::onTrackingUpdated,
-                    onFrameUpdated = ::onFrameUpdated,
-                    previewTransformProvider = {
-                        previewView.outputTransform
-                    },
-                )
-                gestureAnalyzer?.close()
-                gestureAnalyzer = analyzer
-                bindSettingsControls()
-
-                val executor = analysisExecutor ?: Executors.newSingleThreadExecutor().also {
-                    analysisExecutor = it
-                }
-
-                val analysis = ImageAnalysis.Builder()
-                    .setResolutionSelector(portraitSelector)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .setTargetRotation(rotation)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                    .also { it.setAnalyzer(executor, analyzer) }
-
-                previewView.post {
-                    val viewPort = buildViewPort(previewView, rotation)
-                    val group = UseCaseGroup.Builder()
-                        .addUseCase(preview)
-                        .addUseCase(analysis)
-                        .setViewPort(viewPort)
-                        .build()
-                    provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, group)
-                }
-
-                applySkeletonVisibility()
-            } catch (e: Exception) {
-                Log.e(TAG, "Camera bind failed", e)
+                bindAnalysisOnly(provider, rotation, resolutionSelector)
+            } catch (fallbackError: Exception) {
+                Log.e(TAG, "Analysis-only fallback failed", fallbackError)
             }
-        }, ContextCompat.getMainExecutor(this))
+        }
+    }
+
+    private fun ensureGestureAnalyzer() {
+        val previewView = cameraPreviewView
+        val analyzer = HandGestureAnalyzer(
+            applicationContext,
+            onGestureDetected = ::onGestureDetected,
+            onStatusUpdated = ::onTrackingUpdated,
+            onFrameUpdated = ::onFrameUpdated,
+            previewTransformProvider = {
+                if (shouldAttachPreview() && isPreviewLayoutReady()) {
+                    previewView?.outputTransform
+                } else {
+                    null
+                }
+            },
+        )
+        gestureAnalyzer?.close()
+        gestureAnalyzer = analyzer
+        bindSettingsControls()
+    }
+
+    private fun createAnalysis(rotation: Int, resolutionSelector: ResolutionSelector): ImageAnalysis {
+        val executor = analysisExecutor ?: Executors.newSingleThreadExecutor().also {
+            analysisExecutor = it
+        }
+        val analyzer = gestureAnalyzer
+            ?: error("Gesture analyzer must be initialized before analysis use case")
+        return ImageAnalysis.Builder()
+            .setResolutionSelector(resolutionSelector)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setTargetRotation(rotation)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+            .also { it.setAnalyzer(executor, analyzer) }
+    }
+
+    private fun bindAnalysisOnly(
+        provider: ProcessCameraProvider,
+        rotation: Int,
+        resolutionSelector: ResolutionSelector,
+    ) {
+        val analysis = createAnalysis(rotation, resolutionSelector)
+        provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+        Log.d(TAG, "Camera bound: analysis-only (preview hidden or not laid out)")
+    }
+
+    private fun bindPreviewWithAnalysis(
+        provider: ProcessCameraProvider,
+        rotation: Int,
+        resolutionSelector: ResolutionSelector,
+        previewView: PreviewView,
+    ) {
+        val preview = Preview.Builder()
+            .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(rotation)
+            .build()
+            .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+
+        val analysis = createAnalysis(rotation, resolutionSelector)
+
+        try {
+            val viewPort = buildViewPort(previewView, rotation)
+            val group = UseCaseGroup.Builder()
+                .addUseCase(preview)
+                .addUseCase(analysis)
+                .setViewPort(viewPort)
+                .build()
+            provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, group)
+            Log.d(TAG, "Camera bound: preview + analysis with ViewPort")
+        } catch (viewPortError: Exception) {
+            Log.w(TAG, "ViewPort bind failed; using simple dual bind", viewPortError)
+            provider.bindToLifecycle(
+                this,
+                CameraSelector.DEFAULT_FRONT_CAMERA,
+                preview,
+                analysis,
+            )
+        }
+    }
+
+    private fun schedulePreviewBindWhenLaidOut(
+        provider: ProcessCameraProvider,
+        rotation: Int,
+        resolutionSelector: ResolutionSelector,
+    ) {
+        val previewView = cameraPreviewView ?: return
+        bindAnalysisOnly(provider, rotation, resolutionSelector)
+
+        removePreviewLayoutListener()
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            if (!shouldAttachPreview() || !isPreviewLayoutReady()) return@OnGlobalLayoutListener
+            removePreviewLayoutListener()
+            rebindCamera()
+        }
+        previewLayoutListener = listener
+        previewView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    private fun removePreviewLayoutListener() {
+        val previewView = cameraPreviewView ?: return
+        val listener = previewLayoutListener ?: return
+        if (previewView.viewTreeObserver.isAlive) {
+            previewView.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+        }
+        previewLayoutListener = null
     }
 
     private fun buildViewPort(previewView: PreviewView, rotation: Int): ViewPort {
-        val width = max(previewView.width, 1)
-        val height = max(previewView.height, 1)
+        var width = previewView.width
+        var height = previewView.height
+        if (width <= 0 || height <= 0) {
+            width = dp(240)
+            height = dp(200)
+        }
         return ViewPort.Builder(Rational(width, height), rotation)
             .setScaleType(ViewPort.FIT)
             .build()
@@ -537,6 +668,7 @@ class BubbleService : LifecycleService() {
     }
 
     private fun removeOverlays() {
+        removePreviewLayoutListener()
         overlayRoot?.let { windowManager.removeView(it) }
         overlayRoot = null
         cameraProvider?.unbindAll()
