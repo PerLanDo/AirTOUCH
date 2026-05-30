@@ -22,18 +22,6 @@
         android:textColor="#B0B3B8"
         android:textSize="11sp" />
 
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/camera_preview_background">
-
-        <androidx.camera.view.PreviewView
-            android:id="@+id/panel_camera_preview"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </FrameLayout>
-
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -42,6 +30,14 @@
         android:text="@string/gesture_help_short"
         android:textColor="#D0E4FF"
         android:textSize="11sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/camera_preview_hint"
+        android:textColor="#8E9199"
+        android:textSize="10sp" />
 
     <TextView
         android:id="@+id/panel_stop"

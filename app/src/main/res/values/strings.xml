@@ -14,4 +14,8 @@
     <string name="gesture_next">Next</string>
     <string name="gesture_previous">Previous</string>
     <string name="gesture_play_pause">Play / Pause</string>
+    <string name="camera_preview_title">Camera</string>
+    <string name="camera_preview_minimize">Minimize camera preview</string>
+    <string name="camera_preview_maximize">Maximize camera preview</string>
+    <string name="camera_preview_hint">Drag the portrait preview to reposition. Tap −/+ to resize.</string>
 </resources>

@@ -24,9 +24,10 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 
 ## Bubble controls
 
-- **Drag** the bubble to move it
-- **Tap** the bubble to open settings (camera preview, stop)
-- Green border = hand detected
+- **Drag** the bubble or portrait camera preview to move them
+- **Tap** the bubble to open settings (stop, gesture help)
+- **Tap − / +** on the camera preview to minimize or maximize it
+- Green border on bubble = hand detected
 
 ## Build
 
