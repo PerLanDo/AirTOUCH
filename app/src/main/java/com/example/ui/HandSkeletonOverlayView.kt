@@ -84,14 +84,18 @@ class HandSkeletonOverlayView @JvmOverloads constructor(
     private fun mapPoint(landmark: NormalizedLandmark): Pair<Float, Float> {
         val transform = coordinateTransform
         if (transform != null) {
-            val rect = RectF(
-                cropLeft + landmark.x() * imageWidth,
-                cropTop + landmark.y() * imageHeight,
-                cropLeft + landmark.x() * imageWidth + 1f,
-                cropTop + landmark.y() * imageHeight + 1f,
-            )
-            transform.mapRect(rect)
-            return rect.left to rect.top
+            return try {
+                val rect = RectF(
+                    cropLeft + landmark.x() * imageWidth,
+                    cropTop + landmark.y() * imageHeight,
+                    cropLeft + landmark.x() * imageWidth + 1f,
+                    cropTop + landmark.y() * imageHeight + 1f,
+                )
+                transform.mapRect(rect)
+                rect.left to rect.top
+            } catch (_: Exception) {
+                mapPointFallback(landmark)
+            }
         }
 
         return mapPointFallback(landmark)
