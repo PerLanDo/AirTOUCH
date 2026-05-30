@@ -1,37 +1,41 @@
 # Spatial Motion
 
-A simple Android native app for hands-free short video playback. Use hand gestures in front of the front camera to scroll between reels and play or pause.
+A simple Android overlay app with a **floating bubble** that lets you control TikTok, Instagram, Facebook, and YouTube using hand gestures — no built-in video player.
 
-## Features
+## How it works
 
-- Full-screen vertical video reels with looping playback
-- Front-camera hand gesture control (swipe up/down, palm to pause)
-- Floating settings bubble for camera preview and guide
-- Tap video to play or pause manually
+1. Open Spatial Motion and grant three permissions:
+   - **Camera** — tracks your hand
+   - **Display over other apps** — shows the floating bubble
+   - **Accessibility** — sends scroll/tap to the app you are using
+2. Tap **Start floating bubble**
+3. Open TikTok, Instagram, Facebook, or YouTube
+4. Use hand gestures in front of the front camera
 
-## Requirements
+## Gestures
 
-- Android 7.0+ (API 24)
-- Front camera
-- Internet connection (videos stream from sample URLs)
+| Hand gesture | Action in other apps |
+|--------------|----------------------|
+| Closed hand swipe top → bottom | Next video |
+| Closed hand swipe bottom → top | Previous video |
+| Hold open palm in center | Play / Pause (center tap) |
+
+## Bubble controls
+
+- **Drag** the bubble to move it
+- **Tap** the bubble to open settings (camera preview, stop)
+- Green border = hand detected
 
 ## Build
-
-1. Open the project in [Android Studio](https://developer.android.com/studio)
-2. Sync Gradle and run on a physical device (camera gestures need a real front camera)
 
 ```bash
 ./gradlew assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/`.
+Install on a physical device with a front camera. The bubble runs as a foreground service while active.
 
-## Gesture Controls
+## Permissions explained
 
-| Gesture | Action |
-|---------|--------|
-| Closed hand swipe top → bottom | Next reel |
-| Closed hand swipe bottom → top | Previous reel |
-| Hold open palm in center | Play / Pause |
-
-Open the floating settings bubble (bottom-right) to toggle the camera preview or reopen the gesture guide.
+- **Overlay** — required for the floating bubble over other apps
+- **Accessibility** — required to inject scroll and tap gestures into TikTok, IG, FB, YT
+- **Camera** — required for hand tracking only; no video is recorded or uploaded

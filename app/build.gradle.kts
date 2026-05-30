@@ -61,7 +61,7 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
-  implementation(libs.coil.compose)
+  implementation("androidx.lifecycle:lifecycle-service:2.8.7")
   implementation(libs.kotlinx.coroutines.android)
   debugImplementation(libs.androidx.compose.ui.tooling)
 }

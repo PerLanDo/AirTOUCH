@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">Spatial Motion</string>
+    <string name="accessibility_service_description">Sends hand-gesture scroll and tap actions to TikTok, Instagram, Facebook, and YouTube while the Spatial Motion bubble is active.</string>
+    <string name="notification_channel">Spatial Motion bubble</string>
+    <string name="notification_title">Spatial Motion active</string>
+    <string name="notification_body">Floating bubble is controlling other apps with hand gestures.</string>
+    <string name="bubble_content_desc">Spatial Motion floating bubble</string>
+    <string name="bubble_running">Active</string>
+    <string name="hand_detected">Hand detected</string>
+    <string name="settings_title">Bubble settings</string>
+    <string name="settings_subtitle">Open TikTok, IG, FB, or YT and use gestures.</string>
+    <string name="gesture_help_short">Close hand, swipe down = next\nClose hand, swipe up = previous\nHold open palm = play/pause</string>
+    <string name="stop_bubble">Stop bubble</string>
+    <string name="gesture_next">Next</string>
+    <string name="gesture_previous">Previous</string>
+    <string name="gesture_play_pause">Play / Pause</string>
 </resources>
