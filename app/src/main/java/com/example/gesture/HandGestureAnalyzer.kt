@@ -3,6 +3,7 @@ package com.example.gesture
 import android.content.Context
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import java.io.Closeable
 
 enum class GestureType {
@@ -20,6 +21,7 @@ class HandGestureAnalyzer(
     private val onGestureDetected: (GestureType) -> Unit,
     /** x/y = normalized palm position, handConfidence = model confidence (0..1). */
     private val onStatusUpdated: (trackingX: Float, trackingY: Float, handConfidence: Float) -> Unit,
+    private val onLandmarksUpdated: (landmarks: List<NormalizedLandmark>?, confidence: Float) -> Unit = { _, _ -> },
 ) : ImageAnalysis.Analyzer, Closeable {
 
     private data class FrameHistory(
@@ -37,7 +39,7 @@ class HandGestureAnalyzer(
     private val historyWindowMs = 800L
     private var lastTriggerTime = 0L
     private val cooldownMs = 1500L
-    private val minHandConfidence = 0.5f
+    private val minHandConfidence = 0.35f
 
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
@@ -50,6 +52,7 @@ class HandGestureAnalyzer(
             if (detection == null) {
                 decayTrackingTowardCenter()
                 onStatusUpdated(smoothedX, smoothedY, 0f)
+                onLandmarksUpdated(null, 0f)
                 return
             }
 
@@ -57,6 +60,7 @@ class HandGestureAnalyzer(
             smoothedX = smoothedX * 0.70f + pose.palmX * 0.30f
             smoothedY = smoothedY * 0.70f + pose.palmY * 0.30f
             onStatusUpdated(smoothedX, smoothedY, pose.confidence)
+            onLandmarksUpdated(detection.landmarks, pose.confidence)
 
             if (now - lastTriggerTime <= cooldownMs) {
                 history.clear()
@@ -109,6 +113,7 @@ class HandGestureAnalyzer(
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            onLandmarksUpdated(null, 0f)
         } finally {
             image.close()
         }
@@ -120,7 +125,7 @@ class HandGestureAnalyzer(
     }
 
     private fun isPalmHeldStill(frames: List<FrameHistory>): Boolean {
-        if (frames.size < 8) return false
+        if (frames.size < 6) return false
 
         val meanX = frames.map { it.x }.average().toFloat()
         val meanY = frames.map { it.y }.average().toFloat()

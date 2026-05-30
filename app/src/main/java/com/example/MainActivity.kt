@@ -58,9 +58,15 @@ class MainActivity : ComponentActivity() {
             refreshKey++
         }
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            refreshKey++
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BubbleService.createNotificationChannel(this)
+        requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -87,6 +93,18 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshKey++
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     private fun openOverlaySettings() {
