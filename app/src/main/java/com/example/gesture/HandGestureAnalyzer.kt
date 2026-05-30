@@ -1,192 +1,145 @@
 package com.example.gesture
 
+import android.content.Context
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import java.io.Closeable
 
 enum class GestureType {
-    SCROLL_UP,    // Hand moves high to low (up to down)
-    SCROLL_DOWN,  // Hand moves low to high (down to up)
-    PLAY_PAUSE    // Showing palm / held still in center
+    SCROLL_UP,
+    SCROLL_DOWN,
+    PLAY_PAUSE,
 }
 
+/**
+ * Runs MediaPipe hand landmark inference on camera frames and maps skeletal motion
+ * to scroll / play-pause gestures.
+ */
 class HandGestureAnalyzer(
+    context: Context,
     private val onGestureDetected: (GestureType) -> Unit,
-    private val onStatusUpdated: (trackingX: Float, trackingY: Float, skinRatio: Float) -> Unit
-) : ImageAnalysis.Analyzer {
+    /** x/y = normalized palm position, handConfidence = model confidence (0..1). */
+    private val onStatusUpdated: (trackingX: Float, trackingY: Float, handConfidence: Float) -> Unit,
+) : ImageAnalysis.Analyzer, Closeable {
 
-    data class FrameHistory(
+    private data class FrameHistory(
         val timestamp: Long,
         val x: Float,
         val y: Float,
-        val skinRatio: Float
+        val isOpenPalm: Boolean,
+        val isClosedFist: Boolean,
+        val confidence: Float,
     )
 
+    private val landmarkerEngine = HandLandmarkerEngine(context.applicationContext)
     private val history = mutableListOf<FrameHistory>()
+
     private val historyWindowMs = 800L
     private var lastTriggerTime = 0L
     private val cooldownMs = 1500L
+    private val minHandConfidence = 0.5f
 
-    // Minimum skin coverage to register active tracking (0.8% of sub-sampled frame)
-    private val minActiveSkinRatio = 0.008f
-
-    // Open palm coverage used for play/pause; scroll gestures require a closed palm below this
-    private val openPalmSkinRatioThreshold = 0.050f
-    private val closedPalmMaxSkinRatio = 0.045f
-    
     private var smoothedX = 0.5f
     private var smoothedY = 0.5f
 
     override fun analyze(image: ImageProxy) {
         val now = System.currentTimeMillis()
-        
+
         try {
-            val yPlane = image.planes[0]
-            val uPlane = image.planes[1]
-            val vPlane = image.planes[2]
-
-            val yBuffer = yPlane.buffer
-            val uBuffer = uPlane.buffer
-            val vBuffer = vPlane.buffer
-
-            val width = image.width
-            val height = image.height
-
-            val yRowStride = yPlane.rowStride
-            val yPixelStride = yPlane.pixelStride
-            val uRowStride = uPlane.rowStride
-            val uPixelStride = uPlane.pixelStride
-            val vRowStride = vPlane.rowStride
-            val vPixelStride = vPlane.pixelStride
-
-            var skinPixelsCount = 0
-            var sumX = 0L
-            var sumY = 0L
-
-            // Step size for high frequency frame sampling (instant compile with 0 extra load)
-            val stepX = 8
-            val stepY = 8
-            var totalChecked = 0
-
-            for (y in 0 until height step stepY) {
-                for (x in 0 until width step stepX) {
-                    totalChecked++
-                    
-                    val yIndex = y * yRowStride + x * yPixelStride
-                    val uvX = x / 2
-                    val uvY = y / 2
-                    
-                    val uIndex = uvY * uRowStride + uvX * uPixelStride
-                    val vIndex = uvY * vRowStride + uvX * vPixelStride
-
-                    if (yIndex >= yBuffer.remaining() || uIndex >= uBuffer.remaining() || vIndex >= vBuffer.remaining()) {
-                        continue
-                    }
-
-                    val yVal = yBuffer.get(yIndex).toInt() and 0xFF
-                    val uVal = uBuffer.get(uIndex).toInt() and 0xFF
-                    val vVal = vBuffer.get(vIndex).toInt() and 0xFF
-
-                    // Human skin-color clustering boundary:
-                    // V is generally 133 to 175 and U is generally 75 to 128
-                    if (vVal in 133..175 && uVal in 75..128 && yVal > 55) {
-                        skinPixelsCount++
-                        sumX += x
-                        sumY += y
-                    }
-                }
+            val detection = landmarkerEngine.detect(image)
+            if (detection == null) {
+                decayTrackingTowardCenter()
+                onStatusUpdated(smoothedX, smoothedY, 0f)
+                return
             }
 
-            val skinRatio = skinPixelsCount.toFloat() / totalChecked
+            val pose = HandPoseEvaluator.evaluate(detection.landmarks, detection.confidence)
+            smoothedX = smoothedX * 0.70f + pose.palmX * 0.30f
+            smoothedY = smoothedY * 0.70f + pose.palmY * 0.30f
+            onStatusUpdated(smoothedX, smoothedY, pose.confidence)
 
-            var centroidX = 0.5f
-            var centroidY = 0.5f
-
-            if (skinPixelsCount > 10) {
-                centroidX = (sumX.toFloat() / skinPixelsCount) / width
-                // For layout matching, invert camera Y if needed, but standard sensor coordinate is top-to-bottom
-                centroidY = (sumY.toFloat() / skinPixelsCount) / height
-                
-                // Keep history smooth with an exponential filter
-                smoothedX = smoothedX * 0.70f + centroidX * 0.30f
-                smoothedY = smoothedY * 0.70f + centroidY * 0.30f
-            } else {
-                smoothedX = smoothedX * 0.85f + 0.5f * 0.15f
-                smoothedY = smoothedY * 0.85f + 0.5f * 0.15f
-            }
-
-            // Report dynamic indicators back to UI layer
-            onStatusUpdated(smoothedX, smoothedY, skinRatio)
-
-            // Evaluate movement paths when outside of cool-down periods
-            if (now - lastTriggerTime > cooldownMs) {
-                if (skinRatio > minActiveSkinRatio) {
-                    history.add(FrameHistory(now, smoothedX, smoothedY, skinRatio))
-                }
-
-                history.removeAll { now - it.timestamp > historyWindowMs }
-
-                if (history.size >= 6) {
-                    val first = history.first()
-                    val last = history.last()
-                    val duration = last.timestamp - first.timestamp
-
-                    if (duration > 200) {
-                        val avgSkinRatio = history.sumOf { it.skinRatio.toDouble() }.toFloat() / history.size
-                        val maxSkinRatio = history.maxOf { it.skinRatio }
-                        val isClosedPalm =
-                            avgSkinRatio < closedPalmMaxSkinRatio && maxSkinRatio < openPalmSkinRatioThreshold
-
-                        // Gesture 1: SCROLL_UP (Raised / swiped from top to bottom)
-                        // Requires a closed palm so an open palm is reserved for play/pause
-                        if (first.y < 0.40f && last.y > 0.60f && isClosedPalm) {
-                            onGestureDetected(GestureType.SCROLL_UP)
-                            history.clear()
-                            lastTriggerTime = now
-                        }
-                        // Gesture 2: SCROLL_DOWN (Swiped from bottom to top)
-                        // Requires a closed palm so an open palm is reserved for play/pause
-                        else if (first.y > 0.60f && last.y < 0.40f && isClosedPalm) {
-                            onGestureDetected(GestureType.SCROLL_DOWN)
-                            history.clear()
-                            lastTriggerTime = now
-                        }
-                        // Gesture 3: SHOW PALM FOR PLAY/PAUSE
-                        // Triggered when a large palm (high skin ratio) sits steadily in the middle bounds
-                        else if (skinRatio > openPalmSkinRatioThreshold) {
-                            var meanY = 0f
-                            var meanX = 0f
-                            history.forEach {
-                                meanY += it.y
-                                meanX += it.x
-                            }
-                            meanY /= history.size
-                            meanX /= history.size
-
-                            var variance = 0f
-                            history.forEach {
-                                val dy = it.y - meanY
-                                val dx = it.x - meanX
-                                variance += (dy * dy + dx * dx)
-                            }
-                            variance /= history.size
-
-                            // Low coordinate movement variance over recent trail frames proves hand is still and showing a palm
-                            if (variance < 0.0035f && meanY in 0.35f..0.65f && meanX in 0.35f..0.65f && history.size >= 8) {
-                                onGestureDetected(GestureType.PLAY_PAUSE)
-                                history.clear()
-                                lastTriggerTime = now
-                            }
-                        }
-                    }
-                }
-            } else {
+            if (now - lastTriggerTime <= cooldownMs) {
                 history.clear()
+                return
             }
 
+            if (pose.confidence >= minHandConfidence) {
+                history.add(
+                    FrameHistory(
+                        timestamp = now,
+                        x = smoothedX,
+                        y = smoothedY,
+                        isOpenPalm = pose.isOpenPalm,
+                        isClosedFist = pose.isClosedFist,
+                        confidence = pose.confidence,
+                    )
+                )
+            }
+
+            history.removeAll { now - it.timestamp > historyWindowMs }
+
+            if (history.size < 6) return
+
+            val first = history.first()
+            val last = history.last()
+            val duration = last.timestamp - first.timestamp
+            if (duration <= 200) return
+
+            val closedFistSwipe = history.count { it.isClosedFist } >= (history.size * 0.7f)
+            val openPalmHold = history.count { it.isOpenPalm } >= (history.size * 0.75f)
+
+            when {
+                first.y < 0.40f && last.y > 0.60f && closedFistSwipe -> {
+                    onGestureDetected(GestureType.SCROLL_UP)
+                    history.clear()
+                    lastTriggerTime = now
+                }
+
+                first.y > 0.60f && last.y < 0.40f && closedFistSwipe -> {
+                    onGestureDetected(GestureType.SCROLL_DOWN)
+                    history.clear()
+                    lastTriggerTime = now
+                }
+
+                openPalmHold && isPalmHeldStill(history) && isPalmCentered(history) -> {
+                    onGestureDetected(GestureType.PLAY_PAUSE)
+                    history.clear()
+                    lastTriggerTime = now
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
             image.close()
         }
+    }
+
+    private fun decayTrackingTowardCenter() {
+        smoothedX = smoothedX * 0.85f + 0.5f * 0.15f
+        smoothedY = smoothedY * 0.85f + 0.5f * 0.15f
+    }
+
+    private fun isPalmHeldStill(frames: List<FrameHistory>): Boolean {
+        if (frames.size < 8) return false
+
+        val meanX = frames.map { it.x }.average().toFloat()
+        val meanY = frames.map { it.y }.average().toFloat()
+        val variance = frames.sumOf { frame ->
+            val dx = frame.x - meanX
+            val dy = frame.y - meanY
+            (dx * dx + dy * dy).toDouble()
+        }.toFloat() / frames.size
+
+        return variance < 0.0035f
+    }
+
+    private fun isPalmCentered(frames: List<FrameHistory>): Boolean {
+        val meanX = frames.map { it.x }.average().toFloat()
+        val meanY = frames.map { it.y }.average().toFloat()
+        return meanX in 0.35f..0.65f && meanY in 0.35f..0.65f
+    }
+
+    override fun close() {
+        landmarkerEngine.close()
     }
 }
