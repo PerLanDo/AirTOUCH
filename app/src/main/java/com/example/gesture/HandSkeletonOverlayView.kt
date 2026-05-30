@@ -57,11 +57,13 @@ class HandSkeletonOverlayView @JvmOverloads constructor(
         }
     }
 
-    private val animationTick = Runnable {
-        if (!visible) return@Runnable
-        pulsePhase += 0.14f
-        invalidate()
-        postOnAnimation(this)
+    private val animationTick = object : Runnable {
+        override fun run() {
+            if (!visible) return
+            pulsePhase += 0.14f
+            invalidate()
+            postOnAnimation(this)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
