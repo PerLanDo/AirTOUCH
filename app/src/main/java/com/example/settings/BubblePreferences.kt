@@ -13,6 +13,7 @@ object BubblePreferences {
     private const val KEY_GESTURE_COOLDOWN_MS = "gesture_cooldown_ms"
     private const val KEY_MIN_HAND_CONFIDENCE = "min_hand_confidence"
     private const val KEY_PANEL_EXPANDED = "panel_expanded"
+    private const val KEY_BUBBLE_MINIMIZED = "bubble_minimized"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -39,10 +40,10 @@ object BubblePreferences {
     }
 
     fun getGestureCooldownMs(context: Context): Long =
-        prefs(context).getLong(KEY_GESTURE_COOLDOWN_MS, 1_500L)
+        prefs(context).getLong(KEY_GESTURE_COOLDOWN_MS, 1_200L)
 
     fun setGestureCooldownMs(context: Context, ms: Long) {
-        prefs(context).edit { putLong(KEY_GESTURE_COOLDOWN_MS, ms.coerceIn(800L, 3_000L)) }
+        prefs(context).edit { putLong(KEY_GESTURE_COOLDOWN_MS, ms.coerceIn(600L, 2_500L)) }
     }
 
     fun getMinHandConfidence(context: Context): Float =
@@ -57,5 +58,13 @@ object BubblePreferences {
 
     fun setPanelExpanded(context: Context, expanded: Boolean) {
         prefs(context).edit { putBoolean(KEY_PANEL_EXPANDED, expanded) }
+    }
+
+    /** Compact floating chip (icon only) — less distracting. */
+    fun isBubbleMinimized(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_BUBBLE_MINIMIZED, true)
+
+    fun setBubbleMinimized(context: Context, minimized: Boolean) {
+        prefs(context).edit { putBoolean(KEY_BUBBLE_MINIMIZED, minimized) }
     }
 }

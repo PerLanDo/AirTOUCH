@@ -14,6 +14,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import android.util.Rational
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -22,6 +23,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -29,6 +31,8 @@ import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -47,29 +51,31 @@ import com.example.ui.HandSkeletonOverlayView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.max
 
 class BubbleService : LifecycleService() {
 
     private lateinit var windowManager: WindowManager
-    private var overlayRoot: View? = null
+    private var overlayRoot: LinearLayout? = null
     private var overlayParams: WindowManager.LayoutParams? = null
 
+    private var bubbleHeader: View? = null
     private var expandedPanel: View? = null
-    private var panelExpandToggle: ImageView? = null
-    private var cameraSection: View? = null
+    private var bubbleMinimizeToggle: ImageView? = null
     private var cameraPreviewContainer: FrameLayout? = null
     private var cameraPreviewView: PreviewView? = null
     private var cameraPreviewStatus: TextView? = null
     private var cameraSkeletonOverlay: HandSkeletonOverlayView? = null
     private var cameraPreviewToggle: ImageView? = null
     private var cameraPreviewVisible = true
-    private var panelExpanded = true
+    private var bubbleMinimized = true
 
     private var statusText: TextView? = null
     private var bubbleIcon: ImageView? = null
     private var settingShowSkeleton: Switch? = null
     private var settingShowCamera: Switch? = null
     private var settingVibrate: Switch? = null
+    private var settingMinimizeOnStart: Switch? = null
     private var settingCooldown: SeekBar? = null
     private var settingCooldownValue: TextView? = null
 
@@ -81,7 +87,7 @@ class BubbleService : LifecycleService() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         cameraPreviewVisible = BubblePreferences.isShowCameraOnStart(this)
-        panelExpanded = BubblePreferences.isPanelExpanded(this)
+        bubbleMinimized = BubblePreferences.isBubbleMinimized(this)
         startForeground(NOTIFICATION_ID, buildNotification())
         showUnifiedOverlay()
         bindCamera()
@@ -127,13 +133,14 @@ class BubbleService : LifecycleService() {
     @SuppressLint("ClickableViewAccessibility")
     private fun showUnifiedOverlay() {
         val inflater = getSystemService(LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        val root = inflater.inflate(R.layout.overlay_unified_bubble, null)
+        val root = inflater.inflate(R.layout.overlay_unified_bubble, null) as LinearLayout
 
+        overlayRoot = root
+        bubbleHeader = root.findViewById(R.id.bubble_header)
         bubbleIcon = root.findViewById(R.id.bubble_icon)
         statusText = root.findViewById(R.id.bubble_status)
         expandedPanel = root.findViewById(R.id.expanded_panel)
-        panelExpandToggle = root.findViewById(R.id.panel_expand_toggle)
-        cameraSection = root.findViewById(R.id.camera_section)
+        bubbleMinimizeToggle = root.findViewById(R.id.bubble_minimize_toggle)
         cameraPreviewContainer = root.findViewById(R.id.camera_preview_container)
         cameraPreviewView = root.findViewById<PreviewView>(R.id.camera_preview_view).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
@@ -146,16 +153,25 @@ class BubbleService : LifecycleService() {
         settingShowSkeleton = root.findViewById(R.id.setting_show_skeleton)
         settingShowCamera = root.findViewById(R.id.setting_show_camera)
         settingVibrate = root.findViewById(R.id.setting_vibrate)
+        settingMinimizeOnStart = root.findViewById(R.id.setting_minimize_on_start)
         settingCooldown = root.findViewById(R.id.setting_cooldown)
         settingCooldownValue = root.findViewById(R.id.setting_cooldown_value)
 
         root.findViewById<TextView>(R.id.panel_stop).setOnClickListener { stopSelf() }
 
-        panelExpandToggle?.setOnClickListener { togglePanelExpanded() }
+        bubbleMinimizeToggle?.setOnClickListener { toggleBubbleMinimized() }
         cameraPreviewToggle?.setOnClickListener { toggleCameraPreviewVisibility() }
 
+        bubbleIcon?.setOnClickListener {
+            if (bubbleMinimized) {
+                bubbleMinimized = false
+                BubblePreferences.setBubbleMinimized(this, false)
+                applyBubbleMinimizedState(animate = true)
+            }
+        }
+
         bindSettingsControls()
-        applyPanelExpandedState(animate = false)
+        applyBubbleMinimizedState(animate = false)
         applyCameraPreviewVisibility()
 
         val params = WindowManager.LayoutParams(
@@ -201,23 +217,48 @@ class BubbleService : LifecycleService() {
                     }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (!dragging) togglePanelExpanded()
-                    true
-                }
+                MotionEvent.ACTION_UP -> dragging
                 else -> false
             }
         }
 
         windowManager.addView(root, params)
-        overlayRoot = root
         overlayParams = params
+    }
+
+    private fun toggleBubbleMinimized() {
+        bubbleMinimized = !bubbleMinimized
+        BubblePreferences.setBubbleMinimized(this, bubbleMinimized)
+        applyBubbleMinimizedState(animate = true)
+    }
+
+    private fun applyBubbleMinimizedState(animate: Boolean) {
+        val minimized = bubbleMinimized
+        statusText?.visibility = if (minimized) View.GONE else View.VISIBLE
+        expandedPanel?.visibility = if (minimized) View.GONE else View.VISIBLE
+
+        val padding = if (minimized) dp(4) else dp(8)
+        overlayRoot?.setPadding(padding, padding, padding, padding)
+
+        bubbleMinimizeToggle?.setImageResource(
+            if (minimized) R.drawable.ic_preview_maximize else R.drawable.ic_preview_minimize,
+        )
+        bubbleMinimizeToggle?.contentDescription = getString(
+            if (minimized) R.string.bubble_restore else R.string.bubble_minimize,
+        )
+
+        if (animate) {
+            bubbleIcon?.animate()?.scaleX(0.85f)?.scaleY(0.85f)?.setDuration(80)?.withEndAction {
+                bubbleIcon?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
+            }?.start()
+        }
     }
 
     private fun bindSettingsControls() {
         settingShowSkeleton?.isChecked = BubblePreferences.isShowSkeleton(this)
         settingShowCamera?.isChecked = BubblePreferences.isShowCameraOnStart(this)
         settingVibrate?.isChecked = BubblePreferences.isVibrateOnGesture(this)
+        settingMinimizeOnStart?.isChecked = BubblePreferences.isBubbleMinimized(this)
 
         val cooldownMs = BubblePreferences.getGestureCooldownMs(this)
         settingCooldown?.progress = cooldownMsToProgress(cooldownMs)
@@ -238,6 +279,10 @@ class BubbleService : LifecycleService() {
 
         settingVibrate?.setOnCheckedChangeListener { _, checked ->
             BubblePreferences.setVibrateOnGesture(this, checked)
+        }
+
+        settingMinimizeOnStart?.setOnCheckedChangeListener { _, checked ->
+            BubblePreferences.setBubbleMinimized(this, checked)
         }
 
         settingCooldown?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -263,35 +308,13 @@ class BubbleService : LifecycleService() {
     }
 
     private fun cooldownMsToProgress(ms: Long): Int =
-        ((ms - 800L) / 100L).toInt().coerceIn(0, 22)
+        ((ms - 600L) / 100L).toInt().coerceIn(0, 19)
 
     private fun progressToCooldownMs(progress: Int): Long =
-        800L + progress * 100L
+        600L + progress * 100L
 
     private fun updateCooldownLabel(ms: Long) {
         settingCooldownValue?.text = getString(R.string.setting_cooldown_value, ms / 1000f)
-    }
-
-    private fun togglePanelExpanded() {
-        panelExpanded = !panelExpanded
-        BubblePreferences.setPanelExpanded(this, panelExpanded)
-        applyPanelExpandedState(animate = true)
-    }
-
-    private fun applyPanelExpandedState(animate: Boolean) {
-        expandedPanel?.let { panel ->
-            panel.visibility = if (panelExpanded) View.VISIBLE else View.GONE
-            if (animate) {
-                panel.alpha = 0.7f
-                panel.animate().alpha(1f).setDuration(150).start()
-            }
-        }
-        panelExpandToggle?.setImageResource(
-            if (panelExpanded) R.drawable.ic_preview_minimize else R.drawable.ic_preview_maximize,
-        )
-        panelExpandToggle?.contentDescription = getString(
-            if (panelExpanded) R.string.panel_collapse else R.string.panel_expand,
-        )
     }
 
     private fun toggleCameraPreviewVisibility() {
@@ -319,12 +342,18 @@ class BubbleService : LifecycleService() {
     }
 
     private fun isTouchOnInteractiveChild(rawX: Float, rawY: Float): Boolean {
+        if (bubbleMinimized) {
+            return isTouchOnView(bubbleIcon, rawX, rawY) ||
+                isTouchOnView(bubbleMinimizeToggle, rawX, rawY)
+        }
         val interactive = listOfNotNull(
-            panelExpandToggle,
+            bubbleMinimizeToggle,
+            bubbleIcon,
             cameraPreviewToggle,
             settingShowSkeleton,
             settingShowCamera,
             settingVibrate,
+            settingMinimizeOnStart,
             settingCooldown,
             overlayRoot?.findViewById(R.id.panel_stop),
         )
@@ -362,6 +391,9 @@ class BubbleService : LifecycleService() {
                     onGestureDetected = ::onGestureDetected,
                     onStatusUpdated = ::onTrackingUpdated,
                     onFrameUpdated = ::onFrameUpdated,
+                    previewTransformProvider = {
+                        previewView.outputTransform
+                    },
                 )
                 gestureAnalyzer?.close()
                 gestureAnalyzer = analyzer
@@ -379,18 +411,29 @@ class BubbleService : LifecycleService() {
                     .build()
                     .also { it.setAnalyzer(executor, analyzer) }
 
-                provider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    analysis,
-                )
+                previewView.post {
+                    val viewPort = buildViewPort(previewView, rotation)
+                    val group = UseCaseGroup.Builder()
+                        .addUseCase(preview)
+                        .addUseCase(analysis)
+                        .setViewPort(viewPort)
+                        .build()
+                    provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, group)
+                }
 
                 applySkeletonVisibility()
             } catch (e: Exception) {
                 Log.e(TAG, "Camera bind failed", e)
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun buildViewPort(previewView: PreviewView, rotation: Int): ViewPort {
+        val width = max(previewView.width, 1)
+        val height = max(previewView.height, 1)
+        return ViewPort.Builder(Rational(width, height), rotation)
+            .setScaleType(ViewPort.FIT)
+            .build()
     }
 
     private fun onGestureDetected(gesture: GestureType) {
@@ -412,10 +455,17 @@ class BubbleService : LifecycleService() {
         overlayRoot?.post {
             statusText?.text = label
             cameraPreviewStatus?.text = label
+            if (!bubbleMinimized) {
+                bubbleIcon?.animate()?.scaleX(1.15f)?.scaleY(1.15f)?.setDuration(100)?.withEndAction {
+                    bubbleIcon?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(150)?.start()
+                }?.start()
+            }
             overlayRoot?.postDelayed({
-                statusText?.text = getString(R.string.bubble_running)
+                if (!bubbleMinimized) {
+                    statusText?.text = getString(R.string.bubble_running)
+                }
                 cameraPreviewStatus?.text = getString(R.string.bubble_running)
-            }, 900)
+            }, 700)
         }
     }
 
@@ -429,17 +479,23 @@ class BubbleService : LifecycleService() {
         } ?: return
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(40)
+            vibrator.vibrate(35)
         }
     }
 
     private fun onFrameUpdated(frame: HandFrameUpdate) {
         overlayRoot?.post {
             val overlay = cameraSkeletonOverlay ?: return@post
-            overlay.setFrameSize(frame.imageWidth, frame.imageHeight)
+            overlay.setCoordinateTransform(
+                frame.coordinateTransform,
+                frame.imageWidth,
+                frame.imageHeight,
+                frame.cropLeft,
+                frame.cropTop,
+            )
 
             val minConfidence = BubblePreferences.getMinHandConfidence(this)
             if (
@@ -460,12 +516,16 @@ class BubbleService : LifecycleService() {
             bubbleIcon?.setBackgroundResource(
                 if (active) R.drawable.bubble_background_active else R.drawable.bubble_background,
             )
+            if (bubbleMinimized) return@post
+
             val trackingLabel = if (active) {
                 getString(R.string.hand_detected)
             } else {
                 getString(R.string.bubble_running)
             }
-            if (statusText?.text == getString(R.string.bubble_running)) {
+            if (statusText?.text == getString(R.string.bubble_running) ||
+                statusText?.text == getString(R.string.hand_detected)
+            ) {
                 statusText?.text = trackingLabel
             }
             if (cameraPreviewStatus?.text == getString(R.string.bubble_running) ||
