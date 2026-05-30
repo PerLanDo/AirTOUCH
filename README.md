@@ -22,9 +22,10 @@ A simple Android overlay app with a **floating bubble** that lets you control Ti
 
 ## Bubble controls
 
-- **Drag** the bubble to move it
-- **Tap** the bubble to open settings (camera preview, stop)
-- Green border = hand detected
+- **Drag** the bubble or portrait camera preview to move them
+- **Tap** the bubble to open settings (stop, gesture help)
+- **Tap − / +** on the camera preview to minimize or maximize it
+- Green border on bubble = hand detected
 
 ## Build
 
