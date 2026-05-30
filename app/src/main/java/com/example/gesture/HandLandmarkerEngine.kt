@@ -15,34 +15,17 @@ import kotlin.math.max
 
 /**
  * Wraps MediaPipe Hand Landmarker for live camera frames.
- * Detects up to one hand with 21 skeletal landmarks (wrist, palm, and finger joints).
  */
-class HandLandmarkerEngine(context: Context) : Closeable {
+class HandLandmarkerEngine private constructor(
+    private val handLandmarker: HandLandmarker,
+) : Closeable {
 
     data class Detection(
         val landmarks: List<NormalizedLandmark>,
         val confidence: Float,
     )
 
-    private val handLandmarker: HandLandmarker
     private var frameTimestampMs = 0L
-
-    init {
-        val baseOptions = BaseOptions.builder()
-            .setModelAssetPath(MODEL_ASSET)
-            .build()
-
-        val options = HandLandmarker.HandLandmarkerOptions.builder()
-            .setBaseOptions(baseOptions)
-            .setRunningMode(RunningMode.VIDEO)
-            .setNumHands(1)
-            .setMinHandDetectionConfidence(MIN_DETECTION_CONFIDENCE)
-            .setMinHandPresenceConfidence(MIN_PRESENCE_CONFIDENCE)
-            .setMinTrackingConfidence(MIN_TRACKING_CONFIDENCE)
-            .build()
-
-        handLandmarker = HandLandmarker.createFromOptions(context, options)
-    }
 
     fun detect(imageProxy: ImageProxy): Detection? {
         val mediaImage = imageProxy.image ?: return null
@@ -88,5 +71,27 @@ class HandLandmarkerEngine(context: Context) : Closeable {
         private const val MIN_DETECTION_CONFIDENCE = 0.35f
         private const val MIN_PRESENCE_CONFIDENCE = 0.35f
         private const val MIN_TRACKING_CONFIDENCE = 0.35f
+
+        fun create(context: Context): HandLandmarkerEngine? {
+            return try {
+                val baseOptions = BaseOptions.builder()
+                    .setModelAssetPath(MODEL_ASSET)
+                    .build()
+
+                val options = HandLandmarker.HandLandmarkerOptions.builder()
+                    .setBaseOptions(baseOptions)
+                    .setRunningMode(RunningMode.VIDEO)
+                    .setNumHands(1)
+                    .setMinHandDetectionConfidence(MIN_DETECTION_CONFIDENCE)
+                    .setMinHandPresenceConfidence(MIN_PRESENCE_CONFIDENCE)
+                    .setMinTrackingConfidence(MIN_TRACKING_CONFIDENCE)
+                    .build()
+
+                HandLandmarkerEngine(HandLandmarker.createFromOptions(context, options))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create HandLandmarker", e)
+                null
+            }
+        }
     }
 }

@@ -9,12 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
-import android.util.Rational
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -34,14 +35,15 @@ import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
-import androidx.camera.core.UseCaseGroup
-import androidx.camera.core.ViewPort
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleService
 import com.example.MainActivity
 import com.example.R
@@ -85,6 +87,10 @@ class BubbleService : LifecycleService() {
     private var gestureAnalyzer: HandGestureAnalyzer? = null
     private var analysisExecutor: ExecutorService? = null
     private var previewLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var settingsControlsBound = false
+    private var cameraBindRequested = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val rebindCameraRunnable = Runnable { performCameraRebind() }
 
     override fun onCreate() {
         super.onCreate()
@@ -93,7 +99,17 @@ class BubbleService : LifecycleService() {
         bubbleMinimized = BubblePreferences.isBubbleMinimized(this)
         startForeground(NOTIFICATION_ID, buildNotification())
         showUnifiedOverlay()
-        bindCamera()
+
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                requestCameraBind()
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                mainHandler.removeCallbacks(rebindCameraRunnable)
+                cameraProvider?.unbindAll()
+            }
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -103,6 +119,7 @@ class BubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(rebindCameraRunnable)
         gestureAnalyzer?.close()
         gestureAnalyzer = null
         analysisExecutor?.shutdownNow()
@@ -181,7 +198,8 @@ class BubbleService : LifecycleService() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -256,10 +274,18 @@ class BubbleService : LifecycleService() {
             }?.start()
         }
 
-        rebindCamera()
+        scheduleCameraRebind()
     }
 
     private fun bindSettingsControls() {
+        if (settingsControlsBound) {
+            gestureAnalyzer?.updateSettings(
+                BubblePreferences.getGestureCooldownMs(this),
+                BubblePreferences.getMinHandConfidence(this),
+            )
+            return
+        }
+        settingsControlsBound = true
         settingShowSkeleton?.isChecked = BubblePreferences.isShowSkeleton(this)
         settingShowCamera?.isChecked = BubblePreferences.isShowCameraOnStart(this)
         settingVibrate?.isChecked = BubblePreferences.isVibrateOnGesture(this)
@@ -336,7 +362,7 @@ class BubbleService : LifecycleService() {
         cameraPreviewToggle?.contentDescription = getString(
             if (visible) R.string.camera_preview_hide else R.string.camera_preview_show,
         )
-        rebindCamera()
+        scheduleCameraRebind()
     }
 
     private fun applySkeletonVisibility() {
@@ -380,40 +406,50 @@ class BubbleService : LifecycleService() {
         return previewView.width > 0 && previewView.height > 0
     }
 
-    private fun bindCamera() {
+    private fun requestCameraBind() {
         if (!hasCameraPermission()) {
             Log.e(TAG, "Camera permission not granted; skipping camera bind")
             return
         }
+        if (cameraProvider != null) {
+            scheduleCameraRebind()
+            return
+        }
+        if (cameraBindRequested) return
+        cameraBindRequested = true
+
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             try {
                 cameraProvider = providerFuture.get()
-                rebindCamera()
+                getOrCreateGestureAnalyzer()
+                scheduleCameraRebind()
             } catch (e: Exception) {
                 Log.e(TAG, "Camera provider failed", e)
+                cameraBindRequested = false
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun rebindCamera() {
+    private fun scheduleCameraRebind() {
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
+        mainHandler.removeCallbacks(rebindCameraRunnable)
+        mainHandler.postDelayed(rebindCameraRunnable, REBIND_DEBOUNCE_MS)
+    }
+
+    private fun performCameraRebind() {
         val provider = cameraProvider ?: return
         if (!hasCameraPermission()) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
+
+        getOrCreateGestureAnalyzer()
 
         removePreviewLayoutListener()
         try {
             provider.unbindAll()
-            ensureGestureAnalyzer()
 
             val rotation = windowManager.defaultDisplay.rotation
-            val resolutionSelector = ResolutionSelector.Builder()
-                .setAspectRatioStrategy(
-                    AspectRatioStrategy(
-                        AspectRatio.RATIO_16_9,
-                        AspectRatioStrategy.FALLBACK_RULE_AUTO,
-                    ),
-                )
-                .build()
+            val resolutionSelector = buildResolutionSelector()
 
             if (!shouldAttachPreview()) {
                 bindAnalysisOnly(provider, rotation, resolutionSelector)
@@ -430,42 +466,51 @@ class BubbleService : LifecycleService() {
             bindPreviewWithAnalysis(provider, rotation, resolutionSelector, previewView)
             applySkeletonVisibility()
         } catch (e: Exception) {
-            Log.e(TAG, "Camera rebind failed", e)
+            Log.e(TAG, "Camera rebind failed; using analysis-only", e)
             try {
                 provider.unbindAll()
-                val rotation = windowManager.defaultDisplay.rotation
-                val resolutionSelector = ResolutionSelector.Builder()
-                    .setAspectRatioStrategy(
-                        AspectRatioStrategy(
-                            AspectRatio.RATIO_16_9,
-                            AspectRatioStrategy.FALLBACK_RULE_AUTO,
-                        ),
-                    )
-                    .build()
-                bindAnalysisOnly(provider, rotation, resolutionSelector)
+                val fallbackRotation = windowManager.defaultDisplay.rotation
+                bindAnalysisOnly(provider, fallbackRotation, buildResolutionSelector())
             } catch (fallbackError: Exception) {
                 Log.e(TAG, "Analysis-only fallback failed", fallbackError)
             }
         }
     }
 
-    private fun ensureGestureAnalyzer() {
+    private fun buildResolutionSelector(): ResolutionSelector {
+        return ResolutionSelector.Builder()
+            .setAspectRatioStrategy(
+                AspectRatioStrategy(
+                    AspectRatio.RATIO_16_9,
+                    AspectRatioStrategy.FALLBACK_RULE_AUTO,
+                ),
+            )
+            .build()
+    }
+
+    private fun getOrCreateGestureAnalyzer() {
+        if (gestureAnalyzer != null) {
+            bindSettingsControls()
+            return
+        }
         val previewView = cameraPreviewView
-        val analyzer = HandGestureAnalyzer(
+        gestureAnalyzer = HandGestureAnalyzer(
             applicationContext,
             onGestureDetected = ::onGestureDetected,
             onStatusUpdated = ::onTrackingUpdated,
             onFrameUpdated = ::onFrameUpdated,
             previewTransformProvider = {
                 if (shouldAttachPreview() && isPreviewLayoutReady()) {
-                    previewView?.outputTransform
+                    try {
+                        previewView?.outputTransform
+                    } catch (_: Exception) {
+                        null
+                    }
                 } else {
                     null
                 }
             },
         )
-        gestureAnalyzer?.close()
-        gestureAnalyzer = analyzer
         bindSettingsControls()
     }
 
@@ -509,22 +554,21 @@ class BubbleService : LifecycleService() {
         val analysis = createAnalysis(rotation, resolutionSelector)
 
         try {
-            val viewPort = buildViewPort(previewView, rotation)
-            val group = UseCaseGroup.Builder()
-                .addUseCase(preview)
-                .addUseCase(analysis)
-                .setViewPort(viewPort)
-                .build()
-            provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, group)
-            Log.d(TAG, "Camera bound: preview + analysis with ViewPort")
-        } catch (viewPortError: Exception) {
-            Log.w(TAG, "ViewPort bind failed; using simple dual bind", viewPortError)
             provider.bindToLifecycle(
                 this,
                 CameraSelector.DEFAULT_FRONT_CAMERA,
                 preview,
                 analysis,
             )
+            Log.d(TAG, "Camera bound: preview + analysis")
+        } catch (e: Exception) {
+            Log.e(TAG, "Preview bind failed; analysis-only fallback", e)
+            try {
+                provider.unbindAll()
+                bindAnalysisOnly(provider, rotation, resolutionSelector)
+            } catch (fallback: Exception) {
+                Log.e(TAG, "Analysis-only fallback failed", fallback)
+            }
         }
     }
 
@@ -540,7 +584,7 @@ class BubbleService : LifecycleService() {
         val listener = ViewTreeObserver.OnGlobalLayoutListener {
             if (!shouldAttachPreview() || !isPreviewLayoutReady()) return@OnGlobalLayoutListener
             removePreviewLayoutListener()
-            rebindCamera()
+            scheduleCameraRebind()
         }
         previewLayoutListener = listener
         previewView.viewTreeObserver.addOnGlobalLayoutListener(listener)
@@ -553,18 +597,6 @@ class BubbleService : LifecycleService() {
             previewView.viewTreeObserver.removeOnGlobalLayoutListener(listener)
         }
         previewLayoutListener = null
-    }
-
-    private fun buildViewPort(previewView: PreviewView, rotation: Int): ViewPort {
-        var width = previewView.width
-        var height = previewView.height
-        if (width <= 0 || height <= 0) {
-            width = dp(240)
-            height = dp(200)
-        }
-        return ViewPort.Builder(Rational(width, height), rotation)
-            .setScaleType(ViewPort.FIT)
-            .build()
     }
 
     private fun onGestureDetected(gesture: GestureType) {
@@ -618,7 +650,9 @@ class BubbleService : LifecycleService() {
     }
 
     private fun onFrameUpdated(frame: HandFrameUpdate) {
-        overlayRoot?.post {
+        val root = overlayRoot ?: return
+        if (!root.isAttachedToWindow) return
+        root.post {
             val overlay = cameraSkeletonOverlay ?: return@post
             overlay.setCoordinateTransform(
                 frame.coordinateTransform,
@@ -642,7 +676,9 @@ class BubbleService : LifecycleService() {
     }
 
     private fun onTrackingUpdated(x: Float, y: Float, handConfidence: Float) {
-        overlayRoot?.post {
+        val root = overlayRoot ?: return
+        if (!root.isAttachedToWindow) return
+        root.post {
             val active = handConfidence >= BubblePreferences.getMinHandConfidence(this)
             bubbleIcon?.setBackgroundResource(
                 if (active) R.drawable.bubble_background_active else R.drawable.bubble_background,
@@ -708,6 +744,7 @@ class BubbleService : LifecycleService() {
         private const val NOTIFICATION_ID = 1001
         private const val OVERLAY_START_X_DP = 16
         private const val OVERLAY_START_Y_DP = 120
+        private const val REBIND_DEBOUNCE_MS = 200L
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
