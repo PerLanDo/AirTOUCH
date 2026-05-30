@@ -36,6 +36,8 @@ Hand detection uses Google's **MediaPipe Hand Landmarker** (21 skeletal landmark
 ./gradlew assembleDebug
 ```
 
+The installable APK is copied to **`.build-outputs/app-debug.apk`**.
+
 Install on a physical device with a front camera. The bubble runs as a foreground service while active.
 
 ## Permissions explained

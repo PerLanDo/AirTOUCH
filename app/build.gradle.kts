@@ -49,6 +49,27 @@ android {
   }
 }
 
+val repoBuildOutputs = rootProject.layout.projectDirectory.dir(".build-outputs")
+
+tasks.register<Copy>("copyDebugApkToBuildOutputs") {
+  description = "Copy debug APK to .build-outputs at repo root"
+  from(layout.buildDirectory.dir("outputs/apk/debug"))
+  include("app-debug.apk")
+  into(repoBuildOutputs)
+}
+
+tasks.register<Copy>("copyReleaseApkToBuildOutputs") {
+  description = "Copy release APK to .build-outputs at repo root"
+  from(layout.buildDirectory.dir("outputs/apk/release"))
+  include("*.apk")
+  into(repoBuildOutputs)
+}
+
+afterEvaluate {
+  tasks.findByName("assembleDebug")?.finalizedBy("copyDebugApkToBuildOutputs")
+  tasks.findByName("assembleRelease")?.finalizedBy("copyReleaseApkToBuildOutputs")
+}
+
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.accompanist.permissions)
