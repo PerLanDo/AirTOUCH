@@ -131,7 +131,7 @@ private val reelsData = listOf(
     ReelInfo(
         id = 1,
         title = "Golden Hour Mountains",
-        description = "Swipe up or down with your hand to scroll. Hold your palm to play or pause.",
+        description = "Close your hand and swipe up or down to scroll. Hold an open palm to play or pause.",
         creator = "@earth_explorer",
         music = "Original Audio - Earth Explorer",
         videoUrl = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
@@ -653,8 +653,8 @@ private fun GestureGuideDialog(onDismiss: () -> Unit) {
                     textAlign = TextAlign.Center
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                GuideRow(Icons.Rounded.SwipeDown, "Next reel", "Swipe hand from top to bottom")
-                GuideRow(Icons.Rounded.SwipeUp, "Previous reel", "Swipe hand from bottom to top")
+                GuideRow(Icons.Rounded.SwipeDown, "Next reel", "Close hand, swipe top to bottom")
+                GuideRow(Icons.Rounded.SwipeUp, "Previous reel", "Close hand, swipe bottom to top")
                 GuideRow(Icons.Rounded.FrontHand, "Play / Pause", "Hold open palm still in center")
                 Button(
                     onClick = onDismiss,

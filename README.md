@@ -30,8 +30,8 @@ The debug APK is written to `app/build/outputs/apk/debug/`.
 
 | Gesture | Action |
 |---------|--------|
-| Swipe hand top → bottom | Next reel |
-| Swipe hand bottom → top | Previous reel |
+| Closed hand swipe top → bottom | Next reel |
+| Closed hand swipe bottom → top | Previous reel |
 | Hold open palm in center | Play / Pause |
 
 Open the floating settings bubble (bottom-right) to toggle the camera preview or reopen the gesture guide.
